@@ -15,7 +15,7 @@ only gestures at, and measures what it costs.
 | Arithmetic | INT8 weights (per-channel) and activations, int32 accumulation, BatchNorm folded, TFLite-style integer requantization | No float on device; verifiable bit-exactly against a Python simulation |
 | Target | Raspberry Pi (model TBD; aarch64 Linux). Laptop x86 for development | Optional NEON path behind a compile flag; plain C remains the reference |
 | Training | Python (uv), in this repo under `src/sonar_edge/` | Training never runs on device; Python exports weights + golden vectors |
-| Evaluation split | By recording sequence (frame index order), never random frames | Avoids the near-duplicate leak demonstrated in sonar_cnn |
+| Evaluation split | By scene: frames grouped by matching box layout (frame indices turned out to be shuffled), scenes assigned to 5 folds, final numbers by 5-fold cross-validation; fold 0/1 as dev test/val | Avoids the near-duplicate leak demonstrated in sonar_cnn; some classes live in a single scene, so only CV evaluates every class |
 
 ## Data
 
@@ -40,7 +40,7 @@ mAP reported in the final write-up is measured from the C binary, not PyTorch.
 
 | | Milestone | Done when |
 |---|---|---|
-| M0 | Data | Frames + boxes fetched and parsed; sequence split defined and justified; box-size and class statistics; class list confirmed |
+| M0 | Data | Frames + boxes fetched and parsed; scene-fold split defined and justified; box-size and class statistics; class list confirmed |
 | M1 | Float reference model | mAP@0.5 and per-class AP on the sequence split; sanity run on quarry frames; compute budget (MACs) stated |
 | M2 | Integer model | Post-training quantization (QAT only if it loses > 1 mAP point); bit-exact integer simulation; weights header + golden vectors exported |
 | M3 | C runtime | Ops + static arena + model graph; C tests bit-exact against goldens; builds with `-std=c11 -Wall -Wextra -Werror`, no malloc |
@@ -71,5 +71,6 @@ data/             raw dataset (git-ignored)
 - 1,868 frames of one tank scene is small for a detector; small-object recall
   (hooks, end-on standing bottles) is the likely weak spot.
 - Heatmap heads can be sensitive to PTQ; QAT is the fallback.
-- Class balance along the recording may make some sequence splits miss classes;
-  M0 checks this before fixing the split.
+- Standing-bottle (94% of boxes in one scene), valve (66%) and shampoo-bottle
+  (42%) are concentrated in single scenes: when that scene is the test fold the
+  model has barely seen the class. Their per-class AP must be read with this in mind.
