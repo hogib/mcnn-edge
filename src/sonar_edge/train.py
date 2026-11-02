@@ -46,7 +46,7 @@ def cmd_train(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(args.seed)
     model = Detector(config=args.config).to(device)
-    ds, classes = dev_datasets(model.stride, args.scale, args.test_fold, args.val_fold, args.seed)
+    ds, classes = dev_datasets(model.stride, args.scale, args.test_fold, args.val_fold, args.seed, args.aug)
     if args.limit:
         for d in ds.values():
             d.frames = d.frames[: args.limit]
@@ -173,6 +173,7 @@ def main():
     t.add_argument("--bs", type=int, default=16)
     t.add_argument("--lr", type=float, default=2e-3)
     t.add_argument("--seed", type=int, default=0)
+    t.add_argument("--aug", choices=["basic", "strong"], default="basic")
     t.add_argument("--limit", type=int, default=0, help="use only N frames per split (smoke test)")
     t.add_argument("--out", default="runs/dev")
     folds(t)
