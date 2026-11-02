@@ -14,3 +14,9 @@ wheels/
 
 # Training runs
 /runs/
+
+# C build artefacts
+runtime/*.o
+runtime/*.a
+runtime/sonar-detect
+runtime/tests/test_golden
