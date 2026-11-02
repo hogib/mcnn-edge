@@ -124,13 +124,16 @@ because several classes are small:
    objects in whole frames, with no scene shared between training and test,
    gives roughly 55-60 mAP@0.5. The gap is the price of removing both leaks.
 
-## 5. Iteration (in progress)
+## 5. Iteration (interrupted, to be resumed)
 
-Four runs at 150 epochs are in progress on the same split: `base` with basic
-augmentation (schedule-length control), and `base`, `small`, `wide` with strong
-augmentation, which adds random zoom (factor 0.75-1.3, zero fill, boxes scaled
-and clipped, dropped when less than 30% of their area or 4 px remain) and
-Gaussian noise (sigma up to 0.04). Results will be appended here.
+Four runs at 150 epochs are planned on the same split (`run_m1b.sh`): `base`
+with basic augmentation (schedule-length control), and `base`, `small`, `wide`
+with strong augmentation, which adds random zoom (factor 0.75-1.3, zero fill,
+boxes scaled and clipped, dropped when less than 30% of their area or 4 px
+remain) and Gaussian noise (sigma up to 0.04). The first run was stopped at
+epoch 81 of 150 (best validation mAP 59.9 so far, against 59.4 for the 60-epoch
+schedule, i.e. no evidence yet that the schedule length matters); the other
+three had not started. Results will be appended here when the runs complete.
 
 ## 6. Limitations
 
