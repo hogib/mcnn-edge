@@ -1,21 +1,25 @@
-# M0: data
+# M0: data, scene reconstruction and evaluation protocol
 
-Source: `mvaldenegro/marine-debris-fls-datasets` @ `4a77998`, folder
-`md_fls_dataset/data/watertank-segmentation/` (`Images/`, `BoxAnnotations/`;
-masks not fetched). Sparse clone in `data/raw/`, 246 MB.
+## 1. Source
 
-Regenerate everything here with `uv run python -m sonar_edge.stats` and
-`uv run python -m sonar_edge.split`.
+`mvaldenegro/marine-debris-fls-datasets` at commit `4a77998`, folder
+`md_fls_dataset/data/watertank-segmentation/` (Valdenegro-Toro et al., 2025):
+1,868 forward-looking sonar frames recorded with an ARIS Explorer 3000 in the
+Ocean Systems Lab water tank, projected to Cartesian coordinates at 320x480
+pixels, single channel, with one Pascal-VOC-style XML per frame giving boxes
+as (x, y, w, h). Only `Images/` and `BoxAnnotations/` are used (sparse clone,
+246 MB); the segmentation masks are not fetched. All statistics below are
+reproduced by `uv run python -m sonar_edge.stats` and `uv run python -m sonar_edge.split`.
 
-## Frames and boxes
+## 2. Frames and boxes
 
-1,868 frames, 320x480, 1 channel (cartesian-projected fan, black outside the fan).
-3,882 boxes, 11 classes, every frame has at least one box, at most 5, mean 2.08.
-The 11th class is **Wall** (1,056 boxes, 915 frames): tank walls, static across
-scenes. It is kept as a detector class (it is what a deployed system must not
-confuse with debris) but is excluded from scene grouping (below).
+Every frame has at least one box (at most 5, mean 2.08); 3,882 boxes in 11
+classes. The eleventh class, **Wall** (1,056 boxes in 915 frames), labels the
+tank walls. It is retained as a detector class, since a deployed system must
+not report walls as debris, but excluded from the scene matching of Section 3
+because walls are static and would link unrelated scenes.
 
-| Class | Boxes | Frames | Median w x h | w range | h range |
+| Class | Boxes | Frames | Median w x h (px) | w range | h range |
 |---|---|---|---|---|---|
 | Bottle | 468 | 416 | 65 x 47 | 16-159 | 36-213 |
 | Can | 292 | 292 | 40 x 40 | 30-53 | 20-217 |
@@ -29,44 +33,57 @@ confuse with debris) but is excluded from scene grouping (below).
 | Valve | 240 | 237 | 59 x 45 | 37-299 | 13-129 |
 | Wall | 1056 | 915 | 79 x 68 | 10-303 | 12-188 |
 
-Smallest objects are drink cartons (~27x30): a stride-4 heatmap (80x120 cells)
-resolves them comfortably.
+## 3. Frame order and scene reconstruction
 
-## Frame indices are shuffled
+### 3.1 Frame indices carry no temporal information
 
-Two tests, both comparing frame i with i+1, with i+10, and with a random frame:
+A split by recording order would be the natural defence against the
+near-duplicate leak documented in the predecessor study. Two tests show that the
+frame index is not recording order:
 
-| Pair | Thumbnail correlation (median) | Box layouts fully matching (same classes, IoU >= 0.5) |
+| Pair | Median thumbnail correlation | Box layouts fully matching |
 |---|---|---|
-| i, i+1 | 0.757 | 2% |
-| i, i+10 | 0.746 | 3% |
+| (i, i+1) | 0.757 | 2% |
+| (i, i+10) | 0.746 | 3% |
 | random | 0.747 | 2% |
 
-Consecutive indices are no more related than random pairs, and class presence
-is flat across the index range. The index carries no sequence information, so a
-"split by recording order" is impossible from this release. (The separate
-`watertank-v1.0` release, 329 MB, lists no sequence metadata in its description
-either; not fetched.)
+Thumbnail correlation uses 32x48 mean-centred, L2-normalised thumbnails; a
+layout "fully matches" when every box in one frame has a same-class box in the
+other at IoU >= 0.5. Consecutive indices are indistinguishable from random
+pairs, and class presence is uniform along the index range. The separate
+`watertank-v1.0` release (329 MB) describes no sequence metadata either and was
+not fetched.
 
-## Scenes
+### 3.2 Scenes
 
-Two frames are linked when every non-Wall box in each has a same-class box in
-the other at IoU >= 0.5; connected components are scenes. This reconstructs the
-recordings: a scene is one physical arrangement of objects seen through sonar
-drift and gain changes (verified visually on four groups of different sizes).
+Since the recordings cannot be recovered from metadata, they are reconstructed
+from content. Two frames are linked when, ignoring Wall boxes, every box of each
+frame has a same-class box in the other at IoU >= 0.5; the connected components
+of this graph are called *scenes*. Single linkage follows the slow drift of the
+sonar through a recording while the full-match requirement prevents chaining
+through a single shared object. The procedure yields **191 scenes** (largest
+201, 158, 158, 119 and 90 frames; 118 single-frame scenes, mostly frames whose
+only boxes are walls). Visual inspection of random members of four scenes of
+different sizes confirmed that each is one physical arrangement of objects seen
+through small viewpoint and gain changes.
 
-- Linking on all boxes including Wall at a looser threshold (0.5) merges 1,686
-  frames into one component through the static walls; with Wall ignored and a
-  full match required, there are **191 scenes** (largest 201, 158, 158, 119, 90
-  frames; 118 single-frame scenes, mostly frames whose only boxes are walls).
-- Several classes live mostly in one scene: standing-bottle 94% of its boxes,
-  valve 66%, drink-carton 54%, bottle 43%.
+Including Wall boxes in the matching, or lowering the required fraction of
+matched boxes to 0.5, merges 1,686 frames into one component: the static walls
+act as a bridge between otherwise unrelated scenes.
 
-## Folds
+### 3.3 Class concentration
 
-Scenes are assigned to 5 folds, largest first, each to the fold that minimises
-the sum of squared per-class box shares plus squared frame share. File:
-`splits/scene_folds_v1.json` (frame index -> scene id and fold).
+Several classes occur almost entirely in one scene: standing-bottle (94% of its
+boxes), valve (66%), drink-carton (54%), bottle (43%). No single held-out set
+can therefore both train and test on these classes.
+
+## 4. Evaluation protocol
+
+Scenes are assigned to K = 5 folds by a greedy procedure: scenes are taken
+largest first, and each goes to the fold that minimises the sum over classes of
+the squared share of that class's boxes plus the squared share of frames after
+the assignment. The fold file `splits/scene_folds_v1.json` (frame -> scene,
+fold) is committed, so the split is fixed.
 
 | | fold 0 | fold 1 | fold 2 | fold 3 | fold 4 |
 |---|---|---|---|---|---|
@@ -83,9 +100,28 @@ the sum of squared per-class box shares plus squared frame share. File:
 | Valve | 2% | 17% | 66% | 5% | 10% |
 | Wall | 17% | 25% | 16% | 18% | 24% |
 
-Protocol:
-- **Development:** fold 0 = test, fold 1 = validation, folds 2-4 = train.
-- **Final numbers:** 5-fold cross-validation, every scene tested once; AP is
-  pooled over folds per class.
-- Standing-bottle AP will be close to meaningless in any protocol: when fold 3
-  is the test fold the model has seen 4 standing bottles. Report it, flag it.
+- **Development protocol:** fold 0 is the test set, fold 1 the validation set
+  (model selection), folds 2-4 the training set (1,041 / 388 / 439 frames).
+- **Final protocol:** 5-fold cross-validation; every scene is tested exactly
+  once and AP is pooled over folds per class.
+- Standing-bottle cannot be evaluated meaningfully under any protocol: when
+  fold 3 is held out, the training set contains 4 standing bottles. Its AP is
+  reported and flagged.
+
+## 5. Discussion
+
+The reconstruction replaces the missing recording metadata with a conservative
+proxy: two frames end up in different folds unless they demonstrably show the
+same arrangement. It errs on the side of linking too little (a scene whose
+objects were all re-annotated with shifted boxes would split in two), which can
+only make the evaluation stricter, not looser. The concentration of some classes
+in single scenes is a property of the dataset that random image-level splits
+hide entirely; it is the reason the cropped-patch benchmark used by the MCNN
+paper can report near-perfect accuracy on classes the network has effectively
+seen from a single recording.
+
+## References
+
+- Valdenegro-Toro, M., Padmanabhan, D. C., Singh, D., Wehbe, B. and Petillot, Y.
+  (2025). The Marine Debris Forward-Looking Sonar Datasets. OCEANS 2025 Brest.
+  arXiv:2503.22880.
