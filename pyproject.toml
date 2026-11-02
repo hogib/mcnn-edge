@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.5.4",
     "pillow>=13.0.0",
+    "torch>=2.15.0",
 ]
 
 [project.scripts]
@@ -18,3 +19,8 @@ sonar-edge = "sonar_edge:main"
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

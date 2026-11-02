@@ -11,3 +11,6 @@ wheels/
 
 # Raw dataset
 /data/
+
+# Training runs
+/runs/

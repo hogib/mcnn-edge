@@ -1,2 +1,4 @@
 def main() -> None:
-    print("Hello from sonar-edge!")
+    from .train import main as _main
+
+    _main()
