@@ -105,6 +105,50 @@ def report(model, ds, device, classes, out, epoch):
     (out / "results.json").write_text(json.dumps(res, indent=1))
 
 
+def cmd_quantize(args):
+    """M2: calibrate, build the integer model, evaluate it, export weights + goldens."""
+    from .quant import IntDetector, calibrate
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    ck = torch.load(ROOT / args.checkpoint, map_location=device, weights_only=False)
+    model = Detector(config=ck["config"]).to(device).eval()
+    model.load_state_dict(ck["model"])
+    ds, classes = dev_datasets(model.stride, ck["scale"], args.test_fold, args.val_fold)
+    out = (ROOT / args.checkpoint).parent
+
+    def u8(d, idx):  # working-scale uint8 frames
+        return np.stack([np.round(d._prep(d.images[i]) * 255).astype(np.uint8) for i in idx])
+
+    rng = np.random.default_rng(0)
+    calib = u8(ds["train"], rng.choice(len(ds["train"]), args.calib, replace=False))
+    scales = calibrate(model, calib, device, args.pct)
+    print("activation scales (x255 = uint8 range top):", [f"{s * 255:.2f}" for s in scales])
+    q = IntDetector(model, scales)
+    res = {"calib": args.calib, "pct": args.pct, "act_scales": scales}
+    for split in ("val", "test"):
+        d = ds[split]
+        pred = {}
+        for a in range(0, len(d), 8):
+            idx = list(range(a, min(a + 8, len(d))))
+            acc, _ = q.forward(u8(d, idx), device)
+            heat, size, off = q.split_real(acc)
+            for i, dets in zip(idx, decode(heat, size, off, model.stride, 32, -4.0)):
+                pred[d.frames[i].index] = dets
+        aps, m = evaluate(pred, d.gt_boxes(), len(classes))
+        fl = json.loads((out / "results.json").read_text())[split]["map"]
+        print(f"{split}: int8 mAP@0.5 {100 * m:.1f}  (float {100 * fl:.1f}, delta {100 * (m - fl):+.1f})")
+        res[split] = {"map_int8": m, "map_float": fl, "ap": {c: (None if np.isnan(a) else float(a)) for c, a in zip(classes, aps)}}
+    (out / "quant_results.json").write_text(json.dumps(res, indent=1))
+    q.export(out / "int_model.json")
+    # golden vectors: a few test frames with the exact int32 head map
+    gold_idx = [0, len(ds["test"]) // 2, len(ds["test"]) - 1]
+    imgs = u8(ds["test"], gold_idx)
+    acc, _ = q.forward(imgs, device)
+    np.savez_compressed(out / "golden.npz", images=imgs, head=acc.cpu().numpy().astype(np.int32),
+                        frame_index=np.array([ds["test"].frames[i].index for i in gold_idx]))
+    print(f"wrote {out / 'int_model.json'}, {out / 'golden.npz'}, {out / 'quant_results.json'}")
+
+
 def cmd_eval(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     ck = torch.load(ROOT / args.checkpoint, map_location=device, weights_only=False)
@@ -133,6 +177,13 @@ def main():
     t.add_argument("--out", default="runs/dev")
     folds(t)
     t.set_defaults(func=cmd_train)
+
+    qz = sub.add_parser("quantize")
+    qz.add_argument("checkpoint")
+    qz.add_argument("--calib", type=int, default=64, help="calibration frames from the train split")
+    qz.add_argument("--pct", type=float, default=99.99, help="activation percentile for the uint8 range")
+    folds(qz)
+    qz.set_defaults(func=cmd_quantize)
 
     e = sub.add_parser("eval")
     e.add_argument("checkpoint")
