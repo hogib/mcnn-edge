@@ -38,6 +38,9 @@ mAP reported in the final write-up is measured from the C binary, not PyTorch.
 
 ## Milestones
 
+Status (2026-11-02): M0-M4 done on the development split (docs/M0-M4);
+M1 iteration (augmentation, width, schedule) in progress; M5 needs the Pi.
+
 | | Milestone | Done when |
 |---|---|---|
 | M0 | Data | Frames + boxes fetched and parsed; scene-fold split defined and justified; box-size and class statistics; class list confirmed |
