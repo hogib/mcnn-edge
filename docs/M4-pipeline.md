@@ -29,6 +29,7 @@ the same figure measured in Python, with no "deployment gap" to explain.
 |---|---|---|---|---|
 | small | 58.59 | 59.17 | **59.17** | 0.03 points |
 | base | 53.71 | 54.38 | **54.38** | 0.01 points |
+| small, 150 ep, strong aug (M1 §5; shipped `weights.h`) | 64.11 | 65.16 | **65.17** | 0.07 points |
 
 The residual per-class differences of a few hundredths of a point come from
 detections with exactly equal scores whose relative order differs between the

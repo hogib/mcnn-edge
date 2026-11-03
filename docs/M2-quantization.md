@@ -83,11 +83,13 @@ network within 5% relative error.
 | base | test | 53.7 | 54.4 | +0.7 |
 | small | val | 54.1 | 53.3 | -0.7 |
 | small | test | 58.6 | 59.2 | +0.6 |
+| small, 150 ep, strong aug (M1 §5) | val | 55.0 | 53.1 | -1.8 |
+| small, 150 ep, strong aug (M1 §5) | test | 64.1 | 65.2 | +1.1 |
 
 Per-class test AP changes by at most a few points in either direction
 (largest: base drink-carton 32 -> 37, can 20 -> 30; chain 42 -> 38). Calibrated
 activation ranges span 4.5-9.7 (in units of the input range [0, 1]) across
-layers.
+layers (5.0-9.6 for the strongly augmented `small` model that is shipped).
 
 ## 4. Discussion
 

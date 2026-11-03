@@ -38,8 +38,9 @@ mAP reported in the final write-up is measured from the C binary, not PyTorch.
 
 ## Milestones
 
-Status (2026-11-02): M0-M4 done on the development split (docs/M0-M4);
-M1 iteration (augmentation, width, schedule) in progress; M5 needs the Pi.
+Status (2026-11-03): M0-M4 done on the development split (docs/M0-M4); M1
+iteration done (strong augmentation +5 mAP; `small` shipped, `wide` the accuracy
+reference); 5-fold cross-validation running (M1 §7); M5 needs the Pi.
 
 | | Milestone | Done when |
 |---|---|---|
