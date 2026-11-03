@@ -5,6 +5,7 @@ All frames are preloaded as uint8 (1868 x 480 x 320 = 287 MB). Augmentation
 """
 
 import numpy as np
+from PIL import Image
 import torch
 from torch.utils.data import Dataset
 
@@ -23,7 +24,7 @@ class FrameDataset(Dataset):
         self.max_objs = max_objs
         self.rng = np.random.default_rng(seed)
         self.images = np.stack([f.load() for f in frames])  # N,H,W uint8
-        self.h, self.w = FRAME_H // scale, FRAME_W // scale
+        self.h, self.w = int(round(FRAME_H / scale)), int(round(FRAME_W / scale))  # 480x320 / scale
         self.gh, self.gw = self.h // stride, self.w // stride
 
     def __len__(self):
@@ -31,9 +32,11 @@ class FrameDataset(Dataset):
 
     def _prep(self, img):
         """uint8 HxW -> float [0,1] at working scale (area downsample)."""
-        if self.scale > 1:
+        if isinstance(self.scale, int) and self.scale > 1:
             s = self.scale
             img = img[: self.h * s, : self.w * s].reshape(self.h, s, self.w, s).mean((1, 3))
+        elif self.scale != 1:  # non-integer factor (e.g. 4/3 -> 360x240): box-filter resize, result uint8
+            img = np.asarray(Image.fromarray(img).resize((self.w, self.h), Image.BOX))
         return img.astype(np.float32) / 255.0
 
     def __getitem__(self, i):
@@ -45,7 +48,8 @@ class FrameDataset(Dataset):
             if self.rng.random() < 0.5:
                 img = img[:, ::-1]
                 boxes = [(c, self.w - x1, y0, self.w - x0, y1) for c, x0, y0, x1, y1 in boxes]
-            dx, dy = (int(v) for v in self.rng.integers(-8 // self.scale, 8 // self.scale + 1, size=2))
+            j = max(1, int(8 / self.scale))
+            dx, dy = (int(v) for v in self.rng.integers(-j, j + 1, size=2))
             if dx or dy:
                 img = np.roll(img, (dy, dx), axis=(0, 1))
                 boxes = [(c, np.clip(x0 + dx, 0, self.w), np.clip(y0 + dy, 0, self.h),

@@ -165,6 +165,13 @@ def cmd_eval(args):
     report(model, ds, device, classes, (ROOT / args.checkpoint).parent, ck["epoch"])
 
 
+def _scale(text):
+    """'1', '2' -> int; '4/3' or '1.5' -> float."""
+    num, _, den = text.partition("/")
+    v = float(num) / float(den) if den else float(text)
+    return int(v) if v.is_integer() else v
+
+
 def main():
     p = argparse.ArgumentParser(prog="sonar-edge")
     sub = p.add_subparsers(required=True)
@@ -175,7 +182,7 @@ def main():
 
     t = sub.add_parser("train")
     t.add_argument("--config", default="base")
-    t.add_argument("--scale", type=int, default=1, help="input downsample factor")
+    t.add_argument("--scale", type=_scale, default=1, help="input downsample factor: integer, or e.g. 4/3 for 360x240")
     t.add_argument("--epochs", type=int, default=60)
     t.add_argument("--bs", type=int, default=16)
     t.add_argument("--lr", type=float, default=2e-3)
