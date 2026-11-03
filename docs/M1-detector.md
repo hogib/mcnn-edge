@@ -246,12 +246,12 @@ Per-fold test mAP (fold 0 to 4; best epoch 81, 115, 61, 74, 102): float 60.3,
    22.8), which the per-fold means skip or barely weight, and it ranks
    detections of five independently trained models on one score scale, which
    penalises folds whose scores are less well calibrated.
-2. **Classes concentrated in one scene are not learnable under this protocol.**
+2. **Classes concentrated in one scene are barely learnable at this scale.**
    Standing-bottle (94% of its boxes in one scene, M0) reaches 1.2 AP: when its
-   scene is held out the training set contains four examples. This is a
-   property of the dataset, not of the detector, and the number is reported
-   rather than excluded; it costs about 4 mAP points relative to the ten
-   remaining classes.
+   scene is held out the training set contains four examples. The number is
+   reported rather than excluded; it costs about 4 mAP points relative to the
+   ten remaining classes. Section 6.2 shows that the full-resolution model
+   does extract something from those four examples.
 3. **Can is the weakest learnable class** (9.1 AP, 292 boxes, median 40x40 px,
    i.e. 20x20 px at the `small` input scale). Chain (32.5) and shampoo-bottle
    (27.7) follow. These three classes are where resolution or width would have
@@ -264,7 +264,59 @@ Per-fold test mAP (fold 0 to 4; best epoch 81, 115, 61, 74, 102): float 60.3,
 
 ### 6.2 Results: `wide`, strong augmentation, 150 epochs (accuracy reference)
 
-Pending (`run_cv.sh wide_cv wide 1 150 strong`, queued after the `small` runs).
+Same protocol, same folds, same seed; `wide` runs at full resolution (480x320,
+450 M MACs, 13x the compute of `small`). The `small` columns are repeated from
+Section 6.1 for comparison.
+
+| Class (boxes) | wide float | wide int8 | small float | small int8 |
+|---|---|---|---|---|
+| Bottle (468) | 84.7 | 82.7 | 78.0 | 77.4 |
+| Can (292) | 18.8 | 20.5 | 9.1 | 9.6 |
+| Chain (320) | 29.8 | 30.2 | 32.5 | 32.3 |
+| Drink-carton (347) | 81.4 | 79.8 | 62.4 | 64.1 |
+| Hook (171) | 95.5 | 94.9 | 90.8 | 91.4 |
+| Propeller (197) | 46.7 | 46.9 | 51.2 | 50.9 |
+| Shampoo-bottle (111) | 30.5 | 31.4 | 27.7 | 25.5 |
+| Standing-bottle (65) | 24.1 | 26.7 | 1.2 | 2.5 |
+| Tire (615) | 93.9 | 92.7 | 86.8 | 86.8 |
+| Valve (240) | 17.5 | 27.5 | 22.8 | 23.2 |
+| Wall (1056) | 84.8 | 84.9 | 81.3 | 83.4 |
+| **mAP, pooled** | **55.2** | **56.2** | 49.4 | 49.7 |
+| mAP, mean over folds (s.d.) | 62.8 (8.3) | 62.4 (9.1) | 56.4 (8.9) | 55.5 (8.5) |
+
+Per-fold test mAP (fold 0 to 4; best epoch 30, 109, 76, 88, 36): float 66.9,
+68.6, 55.7, 52.1, 70.5; int8 68.6, 68.6, 53.8, 51.1, 69.7.
+
+**Discussion.**
+
+1. **`wide` is better by 5.8 pooled mAP points (6.5 for int8), and the lead
+   is consistent.** It wins on every one of the five folds, by 3.1 to 9.3
+   points (median 7.2), so the difference is not the ~4-point run-to-run
+   noise of Section 5 but a property of the model. The fold ranking is the
+   same for both configurations (folds 0, 1 and 4 easy, 2 and 3 hard), which
+   confirms that the per-fold spread measures the data, not the model.
+2. **The gain is in the small and low-contrast classes.** Drink-carton
+   (+19 points), can (+10), standing-bottle (+23, from chance to 24 AP),
+   bottle (+7) and tire (+7) improve; chain (-3), propeller (-5) and valve
+   (-5) do not. Resolution and width therefore pay for themselves on objects
+   whose extent at the `small` input scale is 20 px or less (Section 4,
+   item 3), and not on the larger or more distinctive classes. The
+   standing-bottle result also qualifies Section 6.1, item 2: at full
+   resolution the four training examples available when its scene is held
+   out are enough to detect some instances, so the class is hard rather
+   than impossible under this protocol.
+3. **Quantisation remains neutral** (+1.0 pooled; per class within +-2
+   points except valve, +10, whose 240 boxes lie in few scenes and whose
+   pooled AP is accordingly unstable).
+4. **Trade-off for deployment.** The 6 points cost 13x the multiply-accumulates
+   (450 M against 35 M per frame): on the laptop in scalar C that is roughly
+   115 ms against 10 ms per frame (extrapolated from the `base` measurement in
+   M3), and on a Raspberry Pi an estimated 0.4-0.6 s against 35-50 ms. `small`
+   stays the shipped configuration under the plan's budget of ~100 M MACs;
+   `wide` is the accuracy reference for the report. The obvious middle
+   ground, `small` input resolution with `wide` channel widths (about 80 M
+   MACs), has not been run and is the natural next experiment if the budget
+   allows it.
 
 ## 7. Limitations
 
