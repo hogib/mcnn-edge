@@ -313,10 +313,78 @@ Per-fold test mAP (fold 0 to 4; best epoch 30, 109, 76, 88, 36): float 66.9,
    115 ms against 10 ms per frame (extrapolated from the `base` measurement in
    M3), and on a Raspberry Pi an estimated 0.4-0.6 s against 35-50 ms. `small`
    stays the shipped configuration under the plan's budget of ~100 M MACs;
-   `wide` is the accuracy reference for the report. The obvious middle
-   ground, `small` input resolution with `wide` channel widths (about 80 M
-   MACs), has not been run and is the natural next experiment if the budget
-   allows it.
+   `wide` is the accuracy reference for the report. Whether the 6 points
+   come from the input resolution or from the channel width is tested in
+   Section 6.3.
+
+### 6.3 Ablation: `small` resolution with `wide` channel widths (`small_wide`)
+
+`wide` differs from `small` in two ways, the input resolution (480x320 against
+240x160) and the channel width of the dilated stack (64 against 32), and
+Section 6.2 cannot separate them. `small_wide` keeps the `small` layout (six
+layers, half-resolution input, 30x20 output grid) and takes the `wide`
+widths: 16-32-64-64-64-64 channels, 90 M MACs (2.6x `small`, a fifth of
+`wide`), 135 k parameters. Same protocol, folds and seed as above.
+
+| Class (boxes) | small float | small_wide float | wide float | small_wide int8 |
+|---|---|---|---|---|
+| Bottle (468) | 78.0 | 55.9 | 84.7 | 59.8 |
+| Can (292) | 9.1 | 8.3 | 18.8 | 8.3 |
+| Chain (320) | 32.5 | 38.3 | 29.8 | 37.7 |
+| Drink-carton (347) | 62.4 | 69.2 | 81.4 | 68.6 |
+| Hook (171) | 90.8 | 95.0 | 95.5 | 92.7 |
+| Propeller (197) | 51.2 | 47.6 | 46.7 | 48.0 |
+| Shampoo-bottle (111) | 27.7 | 42.0 | 30.5 | 32.0 |
+| Standing-bottle (65) | 1.2 | 2.0 | 24.1 | 2.4 |
+| Tire (615) | 86.8 | 84.0 | 93.9 | 85.7 |
+| Valve (240) | 22.8 | 28.8 | 17.5 | 27.7 |
+| Wall (1056) | 81.3 | 81.0 | 84.8 | 82.5 |
+| **mAP, pooled** | 49.4 | **50.2** | 55.2 | **49.6** |
+| mAP, mean over folds (s.d.) | 56.4 (8.9) | 58.0 (11.9) | 62.8 (8.3) | 56.4 (12.4) |
+
+Per-fold test mAP (fold 0 to 4; best epoch 48, 101, 39, 110, 65): float 60.1,
+63.3, 51.1, 42.2, 73.4; int8 58.8, 62.2, 47.5, 41.0, 72.5. Against `small`
+fold by fold: -0.2, +4.0, +1.2, -2.7, +6.0; against `wide`: -6.8, -5.3,
+-4.6, -9.9, +2.9.
+
+**Discussion.**
+
+1. **Width without resolution does not help.** `small_wide` is 0.8 pooled
+   points above `small` in float and 0.1 below in int8; it wins three folds
+   and loses two, all five differences inside the ~4-point run-to-run noise
+   of Section 5. `wide` beats it on four folds of five by 5 to 10 points.
+   The lead of `wide` is therefore a resolution effect, which is what
+   Section 4, item 3 predicted: the classes `wide` gains on (can,
+   standing-bottle, drink-carton, bottle) are those whose extent at the
+   half-resolution input is near or below the 8 px stride, and doubling the
+   channels does not recover what the 2x downsampling has removed. The
+   classes that do move with width (shampoo-bottle +14, chain +6, valve +6,
+   bottle -22) move in both directions and by amounts that single folds
+   explain (next item), so no per-class claim survives.
+2. **The pooled bottle AP is a single-fold failure, not a trend.** Per-fold
+   bottle AP for `small_wide` is 36, 78, 54, 84, 84 against 83, 81, 47, 76,
+   75 for `small`: the fold 0 model (best epoch 48, chosen on fold 1
+   validation) ranks its bottle detections badly, and because pooling scores
+   all folds' predictions on one list, one badly calibrated fold depresses
+   the pooled AP of the class by far more than its share of the boxes. The
+   same mechanism explains the larger fold-to-fold spread (s.d. 11.9 against
+   8.9): the wider model fits the three training folds better and transfers
+   less predictably. This is the price of pooled AP, and the reason the
+   per-fold numbers are reported with it.
+3. **Quantisation costs `small_wide` more than the others.** The int8 model
+   is below float on every fold (-0.9 to -3.6, pooled -0.6), whereas `small`
+   and `wide` were neutral to slightly positive. Shampoo-bottle loses 10
+   points. The cause is not isolated: the per-layer activation scales are
+   within a few percent of `small`'s and the weights are already quantised
+   per channel (M2), so neither range is obviously worse. The effect is
+   consistent in sign but smaller than the run-to-run noise, and would need
+   a per-layer error breakdown (M2, Section 4) before it was acted on. It is
+   noted because it is the first configuration for which PTQ is not free.
+4. **Decision.** `small` stays the shipped configuration: `small_wide` costs
+   2.6x the compute for no measurable gain. If the Pi budget allows ~100 M
+   MACs, the compute should go into resolution (for instance the `base`
+   layout at 480x320 with narrower channels, or `small` at 360x240), not into
+   width.
 
 ## 7. Limitations
 
