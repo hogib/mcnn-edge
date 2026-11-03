@@ -514,10 +514,18 @@ with the smallest median extent, improves only at full resolution.
 \paragraph{Quantisation.} Post-training 8-bit quantisation is neutral for
 \cfg{small} and \cfg{wide} (pooled $+0.3$ and $+1.0$). For \cfg{small\_wide}
 and for \cfg{small} at $360 \times 240$ it costs 0.2--3.6 points on every fold
-($-0.6$ and $-0.9$ pooled), in both cases mostly in shampoo-bottle. The cause
-has not been found: activation ranges and per-channel weight scales do not
-differ materially from those of \cfg{small}. The quantised $360 \times 240$
-model is still 4.0 pooled points above the deployed one.
+($-0.6$ and $-0.9$ pooled). A per-layer comparison of the dequantised
+activations with the float activations on 48 test frames per fold shows no
+difference between the configurations: relative RMS error of 3--8\% per
+layer, saturation below 0.02\%, and head-logit errors of 0.04--0.07 at the
+float model's peaks with a bias of $-0.01$, for \cfg{small}, \cfg{small\_wide}
+and the $360 \times 240$ model alike. The per-class differences are dominated
+by shampoo-bottle, which under int8 moves by up to 30 AP points on single
+folds for every configuration, including the two for which the pooled
+effect is positive; its 111 boxes lie in few scenes. The consistent sign
+over five folds is therefore unexplained, but its magnitude is at the level
+of score-ordering noise, and the quantised $360 \times 240$ model is still
+4.0 pooled points above the deployed one.
 
 \paragraph{Pooled per-class values.} Pooled AP depends on the score
 calibration of the individual fold models, since detections from all five
@@ -544,8 +552,9 @@ reported next to the pooled ones.
   regenerated weight header, since the runtime takes its geometry from that
   header. Expected cost: about 22~ms per frame on the laptop, 80--110~ms on
   a Pi 4.
-  \item Open: the one-point quantisation loss of the two non-deployed
-  configurations; seed repeats under the full cross-validation protocol;
+  \item Open: seed repeats under the full cross-validation protocol (a
+  second seed of the $360 \times 240$ model and the same network at
+  $480 \times 320$ were running at the time of writing);
   the latency and energy measurement on the Raspberry Pi (M5), for which
   the runtime cross-compiles with \texttt{make CC=aarch64-linux-gnu-gcc}.
   \item Known limits of the evaluation: each fold is a single run;

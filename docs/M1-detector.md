@@ -374,12 +374,12 @@ fold by fold: -0.2, +4.0, +1.2, -2.7, +6.0; against `wide`: -6.8, -5.3,
 3. **Quantisation costs `small_wide` more than the others.** The int8 model
    is below float on every fold (-0.9 to -3.6, pooled -0.6), whereas `small`
    and `wide` were neutral to slightly positive. Shampoo-bottle loses 10
-   points. The cause is not isolated: the per-layer activation scales are
-   within a few percent of `small`'s and the weights are already quantised
-   per channel (M2), so neither range is obviously worse. The effect is
-   consistent in sign but smaller than the run-to-run noise, and would need
-   a per-layer error breakdown (M2, Section 4) before it was acted on. It is
-   noted because it is the first configuration for which PTQ is not free.
+   points. The per-layer activation scales are within a few percent of
+   `small`'s and the weights are quantised per channel (M2); the per-layer
+   error breakdown in Section 6.4, item 3 shows the quantisation error of
+   this model to be no larger than `small`'s. The effect is consistent in
+   sign but smaller than the run-to-run noise. It is noted because it is
+   the first configuration for which PTQ is not free.
 4. **Decision.** `small_wide` costs 2.6x the compute for no measurable gain
    and is not shipped. The complementary ablation, the same `small` network
    at a higher input resolution, follows in Section 6.4.
@@ -431,10 +431,20 @@ Per-fold test mAP (fold 0 to 4; best epoch 102, 145, 72, 101, 61): float
    smallest extent in the dataset (M0, Section 2).
 3. **Quantisation costs about one point** (-0.9 pooled; every fold
    negative, -0.2 to -2.3), as for `small_wide` and unlike `small` and `wide`.
-   In both cases the loss is concentrated in shampoo-bottle (-6 here, -10 in
-   Section 6.3), a tall thin class; the common factor is under
-   investigation, but the per-fold loss is below the run-to-run noise and
-   the int8 model remains 4.0 pooled points above `small`.
+   A per-layer breakdown (`sonar_edge.quant_diag`, 48 test frames per fold)
+   finds no mechanism in the arithmetic: the relative RMS error of the
+   dequantised activations is 3-8% per layer for every configuration (the
+   first two layers of `small` on fold 0: 3.1%, 5.6%; of the 360x240 model:
+   3.0%, 5.3%), fewer than 0.02% of activations saturate, and the head
+   logits at the float model's peaks differ by 0.04-0.07 on average with a
+   bias of -0.01, for `small`, `small_wide` and the 360x240 model alike. The
+   per-class shampoo-bottle differences that dominate the pooled loss are
+   not specific either: under int8 that class swings by up to 30 AP points
+   on single folds for every configuration, including `small` (fold 1: 36
+   to 6) and `wide` (fold 0: 29 to 65), because its 111 boxes lie in few
+   scenes. The consistent sign over five folds is therefore unexplained
+   but its magnitude is at the level of score-ordering noise, and the int8
+   model remains 4.0 pooled points above `small`.
 4. **Deployment.** At 78 M MACs the 360x240 model is within the plan's ~100 M
    MAC budget; the C runtime takes the input geometry from the exported
    header, so the only change for deployment is to regenerate `weights.h`
