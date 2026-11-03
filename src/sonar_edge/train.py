@@ -138,6 +138,7 @@ def cmd_quantize(args):
         fl = json.loads((out / "results.json").read_text())[split]["map"]
         print(f"{split}: int8 mAP@0.5 {100 * m:.1f}  (float {100 * fl:.1f}, delta {100 * (m - fl):+.1f})")
         res[split] = {"map_int8": m, "map_float": fl, "ap": {c: (None if np.isnan(a) else float(a)) for c, a in zip(classes, aps)}}
+        (out / f"pred_{split}_int8.json").write_text(json.dumps({str(k): v for k, v in pred.items()}))
     (out / "quant_results.json").write_text(json.dumps(res, indent=1))
     q.export(out / "int_model.json")
     # golden vectors: a few test frames with the exact int32 head map
@@ -147,6 +148,12 @@ def cmd_quantize(args):
     np.savez_compressed(out / "golden.npz", images=imgs, head=acc.cpu().numpy().astype(np.int32),
                         frame_index=np.array([ds["test"].frames[i].index for i in gold_idx]))
     print(f"wrote {out / 'int_model.json'}, {out / 'golden.npz'}, {out / 'quant_results.json'}")
+
+
+def _cmd_cv(args):
+    from .cv import cmd_cv
+
+    cmd_cv(args)
 
 
 def cmd_eval(args):
@@ -190,6 +197,11 @@ def main():
     e.add_argument("checkpoint")
     folds(e)
     e.set_defaults(func=cmd_eval)
+
+    cv = sub.add_parser("cv", help="pool the test predictions of runs/<prefix>_f{0..k-1} (see cv.py)")
+    cv.add_argument("prefix", help="run prefix, e.g. runs/small_cv")
+    cv.add_argument("--k", type=int, default=5)
+    cv.set_defaults(func=_cmd_cv)
 
     args = p.parse_args()
     args.func(args)
