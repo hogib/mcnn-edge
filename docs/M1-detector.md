@@ -315,7 +315,7 @@ Per-fold test mAP (fold 0 to 4; best epoch 30, 109, 76, 88, 36): float 66.9,
    stays the shipped configuration under the plan's budget of ~100 M MACs;
    `wide` is the accuracy reference for the report. Whether the 6 points
    come from the input resolution or from the channel width is tested in
-   Section 6.3.
+   Sections 6.3 and 6.4.
 
 ### 6.3 Ablation: `small` resolution with `wide` channel widths (`small_wide`)
 
@@ -380,11 +380,69 @@ fold by fold: -0.2, +4.0, +1.2, -2.7, +6.0; against `wide`: -6.8, -5.3,
    consistent in sign but smaller than the run-to-run noise, and would need
    a per-layer error breakdown (M2, Section 4) before it was acted on. It is
    noted because it is the first configuration for which PTQ is not free.
-4. **Decision.** `small` stays the shipped configuration: `small_wide` costs
-   2.6x the compute for no measurable gain. If the Pi budget allows ~100 M
-   MACs, the compute should go into resolution (for instance the `base`
-   layout at 480x320 with narrower channels, or `small` at 360x240), not into
-   width.
+4. **Decision.** `small_wide` costs 2.6x the compute for no measurable gain
+   and is not shipped. The complementary ablation, the same `small` network
+   at a higher input resolution, follows in Section 6.4.
+
+### 6.4 Ablation: `small` at 360x240 (resolution without width)
+
+The complement of Section 6.3: the unchanged `small` network (42 k
+parameters) applied to the frame downsampled by 4/3 instead of 2 (box-filter
+resize, 360x240 input, 45x30 output grid), 78 M MACs per frame, 2.25x `small`
+and a sixth of `wide`. Same protocol, folds and seed.
+
+| Class (boxes) | small 240x160 | small 360x240 | wide 480x320 | small 360x240, int8 |
+|---|---|---|---|---|
+| Bottle (468) | 78.0 | 84.2 | 84.7 | 84.4 |
+| Can (292) | 9.1 | 16.1 | 18.8 | 16.8 |
+| Chain (320) | 32.5 | 41.4 | 29.8 | 39.1 |
+| Drink-carton (347) | 62.4 | 69.8 | 81.4 | 71.0 |
+| Hook (171) | 90.8 | 93.6 | 95.5 | 93.2 |
+| Propeller (197) | 51.2 | 49.1 | 46.7 | 49.2 |
+| Shampoo-bottle (111) | 27.7 | 37.6 | 30.5 | 31.4 |
+| Standing-bottle (65) | 1.2 | 3.7 | 24.1 | 3.9 |
+| Tire (615) | 86.8 | 84.4 | 93.9 | 82.3 |
+| Valve (240) | 22.8 | 38.6 | 17.5 | 37.5 |
+| Wall (1056) | 81.3 | 82.6 | 84.8 | 81.9 |
+| **mAP, pooled** | 49.4 | **54.6** | 55.2 | **53.7** |
+| mAP, mean over folds (s.d.) | 56.4 (8.9) | 59.5 (9.3) | 62.8 (8.3) | 58.3 (9.7) |
+
+Per-fold test mAP (fold 0 to 4; best epoch 102, 145, 72, 101, 61): float
+64.0, 66.5, 52.3, 47.0, 67.7; int8 63.8, 65.4, 51.5, 44.7, 66.2. Against
+`small` fold by fold: +3.7, +7.2, +2.4, +2.1, +0.3; against `wide`: -2.9,
+-2.1, -3.4, -5.1, -2.8.
+
+**Discussion.**
+
+1. **Resolution is the effective factor.** At 360x240 the `small` network
+   gains 5.2 pooled points, 90% of the 5.8-point lead of `wide`, with no
+   change to the network and 2.25x the compute (against 13x). It beats
+   `small` on every fold, by 0.3 to 7.2 points, and trails `wide` on every
+   fold by 2 to 5 points. Together with Section 6.3 (width alone: +0.8,
+   inside the noise) this settles the question of Section 6.2: the
+   improvement of `wide` comes from the input resolution, and most of it is
+   available at a fifth of its cost.
+2. **The gains are in the same classes as for `wide`,** bottle (+6), can
+   (+7), drink-carton (+7), plus chain (+9), shampoo-bottle (+10) and valve
+   (+16), the last three of which `wide` did not improve. Tire (-2) and
+   propeller (-2) are flat. Standing-bottle stays at chance (3.7); the 24 AP
+   that `wide` reaches on it at full resolution is the one gain that 360x240
+   does not reproduce, consistent with its 25 px median width being the
+   smallest extent in the dataset (M0, Section 2).
+3. **Quantisation costs about one point** (-0.9 pooled; every fold
+   negative, -0.2 to -2.3), as for `small_wide` and unlike `small` and `wide`.
+   In both cases the loss is concentrated in shampoo-bottle (-6 here, -10 in
+   Section 6.3), a tall thin class; the common factor is under
+   investigation, but the per-fold loss is below the run-to-run noise and
+   the int8 model remains 4.0 pooled points above `small`.
+4. **Deployment.** At 78 M MACs the 360x240 model is within the plan's ~100 M
+   MAC budget; the C runtime takes the input geometry from the exported
+   header, so the only change for deployment is to regenerate `weights.h`
+   from a 360x240 run. The expected cost is about 22 ms per frame on the
+   laptop (2.25x the 9.9 ms of M4) and 80-110 ms on a Pi 4 by the M3
+   estimate. The choice between the two is a latency decision: `small`
+   stays the shipped configuration in this document, with the 360x240 model
+   as the recommended alternative where the budget allows.
 
 ## 7. Limitations
 
