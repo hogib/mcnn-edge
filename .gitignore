@@ -20,3 +20,8 @@ runtime/*.o
 runtime/*.a
 runtime/sonar-detect
 runtime/tests/test_golden
+
+# LaTeX intermediates (report/overview.pdf is tracked)
+report/*.aux
+report/*.log
+report/*.out
