@@ -210,8 +210,61 @@ measure of fold-to-fold variation. The float model and its post-training int8
 quantisation (M2) are both pooled, since the C runtime reproduces the latter
 exactly (M4).
 
-Results are appended when the runs complete (`run_cv.sh small_cv small 2 150
-strong`, then `wide` for reference).
+### 6.1 Results: `small`, strong augmentation, 150 epochs (the shipped configuration)
+
+Pooled AP over all 1,868 frames (every scene tested once), float model and its
+int8 quantisation; the number of boxes is the support of each class in the
+whole dataset.
+
+| Class (boxes) | Float AP | Int8 AP |
+|---|---|---|
+| Bottle (468) | 78.0 | 77.4 |
+| Can (292) | 9.1 | 9.6 |
+| Chain (320) | 32.5 | 32.3 |
+| Drink-carton (347) | 62.4 | 64.1 |
+| Hook (171) | 90.8 | 91.4 |
+| Propeller (197) | 51.2 | 50.9 |
+| Shampoo-bottle (111) | 27.7 | 25.5 |
+| Standing-bottle (65) | 1.2 | 2.5 |
+| Tire (615) | 86.8 | 86.8 |
+| Valve (240) | 22.8 | 23.2 |
+| Wall (1056) | 81.3 | 83.4 |
+| **mAP, pooled** | **49.4** | **49.7** |
+| mAP, mean over folds (s.d.) | 56.4 (8.9) | 55.5 (8.5) |
+
+Per-fold test mAP (fold 0 to 4; best epoch 81, 115, 61, 74, 102): float 60.3,
+59.3, 49.9, 44.9, 67.4; int8 58.9, 56.4, 50.3, 44.7, 67.0.
+
+**Discussion.**
+
+1. **The pooled number is 49.4 mAP, not the 64 of the development split.** The
+   development test fold (fold 0) is the easiest of the five together with
+   fold 4; the folds span 45-67 mAP (s.d. 8.9), which is the fold-composition
+   effect anticipated in M0 and in Section 5. The pooled estimate is lower
+   than the fold mean for two reasons: it includes the classes that are absent
+   or nearly absent from individual folds (standing-bottle at 1.2 AP, valve at
+   22.8), which the per-fold means skip or barely weight, and it ranks
+   detections of five independently trained models on one score scale, which
+   penalises folds whose scores are less well calibrated.
+2. **Classes concentrated in one scene are not learnable under this protocol.**
+   Standing-bottle (94% of its boxes in one scene, M0) reaches 1.2 AP: when its
+   scene is held out the training set contains four examples. This is a
+   property of the dataset, not of the detector, and the number is reported
+   rather than excluded; it costs about 4 mAP points relative to the ten
+   remaining classes.
+3. **Can is the weakest learnable class** (9.1 AP, 292 boxes, median 40x40 px,
+   i.e. 20x20 px at the `small` input scale). Chain (32.5) and shampoo-bottle
+   (27.7) follow. These three classes are where resolution or width would have
+   to pay for itself; the dev-split result for `wide` (Section 5) suggests it
+   does for can and drink-carton.
+4. **Quantisation is neutral at the pooled level** (+0.3 mAP, per-class within
+   +-2.2 points, no consistent sign), confirming the M2 conclusion on the whole
+   dataset. Since the C runtime reproduces the int8 model exactly (M4), 49.7
+   pooled mAP is the accuracy of the deployed system.
+
+### 6.2 Results: `wide`, strong augmentation, 150 epochs (accuracy reference)
+
+Pending (`run_cv.sh wide_cv wide 1 150 strong`, queued after the `small` runs).
 
 ## 7. Limitations
 

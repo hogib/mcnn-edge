@@ -40,7 +40,7 @@ mAP reported in the final write-up is measured from the C binary, not PyTorch.
 
 Status (2026-11-03): M0-M4 done on the development split (docs/M0-M4); M1
 iteration done (strong augmentation +5 mAP; `small` shipped, `wide` the accuracy
-reference); 5-fold cross-validation running (M1 §7); M5 needs the Pi.
+reference); 5-fold CV of `small` done: 49.4 float / 49.7 int8 pooled mAP (M1 §6), `wide` CV running; M5 needs the Pi.
 
 | | Milestone | Done when |
 |---|---|---|
