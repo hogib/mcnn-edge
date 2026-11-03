@@ -20,6 +20,8 @@ CONFIGS = {
     "wide": [(16, 2, 1), (32, 2, 1), (64, 2, 1), (64, 1, 1), (64, 1, 2), (64, 1, 4), (64, 1, 8)],
     # narrower, for the half-res input (stride 8 of a 240x160 frame -> 30x20 grid)
     "small": [(16, 2, 1), (32, 2, 1), (32, 2, 1), (32, 1, 1), (32, 1, 2), (32, 1, 4)],
+    # small's half-res layout with wide's channel widths: separates the effect of width from resolution
+    "small_wide": [(16, 2, 1), (32, 2, 1), (64, 2, 1), (64, 1, 1), (64, 1, 2), (64, 1, 4)],
 }
 
 
@@ -80,6 +82,6 @@ def receptive_field(config) -> int:
 if __name__ == "__main__":
     for name in CONFIGS:
         m = Detector(config=name)
-        scale = 2 if name == "small" else 1
+        scale = 2 if name.startswith("small") else 1
         print(f"{name:6s} stride {m.stride}  params {sum(p.numel() for p in m.parameters()):8,d}  "
               f"MACs {macs(m, 480 // scale, 320 // scale) / 1e6:6.1f}M  RF {receptive_field(name) * scale} px (input /{scale})")
