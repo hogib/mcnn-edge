@@ -153,9 +153,30 @@ the three-seed box-only mean, i.e. about 1.5 seed standard deviations, with
 per-fold differences to the box-only means of -3.5, +0.9, -6.0, -0.8, -1.0.
 The per-class box losses are in chain (-7), tire (-4), shampoo-bottle (-7)
 and valve (-14), the last two among the seed-noisy classes; can (+4) and
-drink-carton (+1) gain. One seed, so this is suggestive rather than
-established, but it is the first segmentation setting whose box mAP is
-below every seed of the box-only model.
+drink-carton (+1) gain.
+
+**Seed repeat and Dice weight.** A second seed of the same setting
+(`runs/small_360_segdice_s1_cv`) and a run with the Dice weight lowered to
+0.3 (`runs/small_360_segdice03_cv`, seed 0) complete the picture:
+
+| Setting | mIoU pooled (int8) | per fold | Boxes pooled float (int8) | per fold | Box-only mean per fold |
+|---|---|---|---|---|---|
+| Dice 1, seed 0 | 41.2 (41.3) | 40.0, 49.0, 39.0, 31.0, 40.4 | 49.8 (49.0) | 57.5, 66.0, 46.2, 47.4, 66.5 | 61.0, 65.1, 52.2, 48.2, 67.5 |
+| Dice 1, seed 1 | 42.8 (42.8) | 42.5, 48.5, 38.9, 30.1, 43.0 | 50.8 (50.4) | 68.2, 65.2, 47.1, 45.0, 68.6 | |
+| Dice 1, mean (s.d.) | **42.0 (1.1)** | | **50.3 (0.7)** | | 52.6 (1.9) |
+| Dice 0.3, seed 0 | **38.9** (38.9) | 37.5, 45.5, 36.7, 26.5, 40.3 | **51.1** (52.1) | 63.5, 65.1, 51.4, 47.3, 63.3 | |
+| Dice 0, stride 4 (3.3) | 35.0 (35.0) | 35.3, 42.7, 32.0, 23.1, 35.5 | 52.0 (53.5) | 67.9, 61.4, 49.7, 47.1, 68.2 | |
+
+The second Dice-1 seed reproduces the masks (42.8; the two seeds are 1.1
+apart) and the box cost: 50.8 and 49.8 against 54.6, 52.2 and 51.0 for the
+three box-only seeds, so every Dice-1 seed is below every box-only seed and
+the mean difference is -2.3 points. Fold 0 is again the noisy fold (57.5
+against 68.2 between the seeds). With the Dice weight at 0.3 the masks keep
+63% of the gain (38.9, +3.9 over no Dice, positive on every fold) and the
+boxes return to the box-only range (51.1, inside 51.0-54.6; per-fold
+differences to the box-only means +2.5, 0.0, -0.8, -0.9, -4.2). Best
+epochs: Dice 1 seed 1: 99, 77, 129, 103, 99; Dice 0.3: 62, 126, 120, 81,
+123. The int8 masks equal the float masks in every run.
 
 ## 4. Discussion
 
@@ -174,15 +195,19 @@ below every seed of the box-only model.
    resolution. The Dice term (Section 3.4) confirms this: it raises
    precision by 10-25 points per class and mIoU by 6.2 pooled, on every
    fold, with the same grid and features.
-5. **Multi-task trade-off.** With cross-entropy only, the boxes were
-   unaffected by the segmentation head (items 1 and 2). With the Dice term
-   the masks improve and the boxes lose about 3 pooled points (Section
-   3.4): the shared 43 k-parameter backbone is now pulled towards the
-   dense objective. The two ways out are a smaller Dice weight (0.3 rather
-   than 1) and a wider head or backbone; which one restores the boxes
-   without giving back the masks is the next experiment. Until then the
-   box-only model stays shipped, and the Dice model is the segmentation
-   reference.
+5. **Multi-task trade-off, and where it is settled.** With cross-entropy
+   only, the boxes were unaffected by the segmentation head (items 1 and
+   2). With a Dice term of weight 1 the masks gain 7 pooled mIoU over two
+   seeds and the boxes lose 2.3, consistently over seeds (Section 3.4):
+   the shared 43 k-parameter backbone is pulled towards the dense
+   objective. The Dice weight trades the two off smoothly: at 0.3 the
+   masks keep +3.9 of the +7 and the boxes are back inside the box-only
+   seed range. For a deployment that needs both outputs, Dice 0.3 on the
+   stride-4 head (80.5 M MACs, mIoU 38.9, box mAP 51.1) is the setting to
+   ship; for masks alone, Dice 1 (42.0). The shipped `weights.h` remains
+   the box-only model, since the application has so far asked for boxes.
+   A wider backbone, which might remove the trade-off rather than balance
+   it, has not been run.
 3. **Few-scene classes fail as they do for boxes.** Standing-bottle (3.2)
    and valve (5.4) are the classes concentrated in one scene (M0 §3.3);
    the segmentation head cannot learn them from the other folds either.
@@ -208,8 +233,7 @@ below every seed of the box-only model.
 - weight_bg = 0.1 was chosen from a single comparison with 1.0, not swept.
 - The stride-4 result is one seed; its +1.1 is below the ~2-point pooled seed
   noise of M1 §6.5, although the sign is consistent over four folds. The
-  Dice result is also one seed; its +6.2 mIoU is well outside that noise,
-  its -2.8 box mAP is at about 1.5 standard deviations and needs a seed
-  repeat before it is acted on.
+  Dice-1 result has two seeds (masks 42.0 +- 1.1, boxes 50.3 +- 0.7); the
+  Dice-0.3 result has one.
 - The per-cell target is the centre pixel's label; objects thinner than a
   cell can be missed by the target itself (part of the 77-point ceiling).
