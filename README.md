@@ -14,7 +14,9 @@ Python int8 model), 20 ms per frame on one laptop core. Regenerate with
 
 The dataset's pixel labels (`Masks/`, fetch them into the sparse checkout) train an optional
 12-channel segmentation head on the same features: `sonar-edge train ... --seg --seg-bg-w 0.1`;
-mIoU is reported next to mAP and pooled by `sonar-edge cv`. See `docs/M6-segmentation.md`.
+mIoU is reported next to mAP (float and int8) and pooled by `sonar-edge cv`. The C runtime
+emits the per-cell label map for such models (`se_segment`, `sonar-detect -s DIR`). See
+`docs/M6-segmentation.md`.
 
 ## Report
 

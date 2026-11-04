@@ -695,9 +695,12 @@ a halo of background around them, which costs a large fraction of the IoU of
 objects 4--10 cells wide. Standing-bottle and valve fail as they do for
 boxes, for the same one-scene reason. The levers not yet tried are a Dice or
 IoU term in place of the fixed background weight, a stride-4 output for this
-head (one upsampling layer), and more capacity. The C runtime already
-computes the 27-channel head map (the quantised model pools 52.2 box mAP)
-but does not yet emit the per-cell label.
+head (one upsampling layer), and more capacity. Quantisation is free for the
+masks: the int8 model pools 33.8 mIoU against 33.9. The C runtime emits the
+per-cell label map for models exported with the head (\texttt{se\_segment},
+an argmax on the real-valued channels in the Python operation order); the
+golden test checks it cell by cell against the Python int8 model and all
+$3 \times 1350$ cells agree.
 
 \paragraph{Pooled per-class values.} Pooled AP depends on the score
 calibration of the individual fold models, since detections from all five
@@ -728,9 +731,9 @@ deployed model's latency is too high for the application. The hardware was not a
 writing.
 
 \paragraph{Segmentation.} Section~\ref{sec:segres} gives the first
-result. The next steps are a stride-4 segmentation output, a Dice term in
-the loss, the per-cell \texttt{argmax} in the C decoder, and the mIoU of
-the quantised model.
+result; the C decoder emits the label map and the quantised model's mIoU
+equals the float one. The next steps are a stride-4 segmentation output and
+a Dice term in the loss.
 
 \section{Conclusions and open items}
 

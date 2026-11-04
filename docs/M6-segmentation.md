@@ -73,7 +73,7 @@ mIoU by 8 points; the boxes do not suffer (67.3, the best of the four
 
 | | Boxes, pooled mAP float / int8 | Per fold (float) | mIoU pooled | mIoU objects | mIoU per fold |
 |---|---|---|---|---|---|
-| 360x240 + seg | 52.1 / 52.2 | 61.7, 67.6, 48.2, 48.7, 66.3 | **33.9** | **28.2** | 34.0, 39.9, 29.8, 24.2, 35.1 |
+| 360x240 + seg | 52.1 / 52.2 | 61.7, 67.6, 48.2, 48.7, 66.3 | **33.9** (int8 33.8) | **28.2** (int8 28.1) | 34.0, 39.9, 29.8, 24.2, 35.1 |
 | 360x240, boxes only, 3 seeds (M1 §6.5) | 52.6 +- 1.9 / 52.3 | 61.0, 65.1, 52.2, 48.2, 67.5 (means) | - | - | - |
 
 Pooled per-class IoU, recall and precision (test folds summed):
@@ -95,7 +95,10 @@ Pooled per-class IoU, recall and precision (test folds summed):
 
 Box AP per class is within the seed spread of the box-only model for every
 class (bottle 86.0, tire 89.7, drink-carton 76.8, can 17.3, chain 39.0,
-valve 13.5, standing-bottle 3.6).
+valve 13.5, standing-bottle 3.6). The int8 masks (per-cell argmax of the
+quantised head, `sonar-edge quantize` after this milestone) pool to 33.8
+mIoU against 33.9 float, per fold within 0.2, and every per-class IoU within
+0.3: quantisation is free for the masks as for the boxes.
 
 ## 4. Discussion
 
@@ -117,14 +120,21 @@ valve 13.5, standing-bottle 3.6).
    and valve (5.4) are the classes concentrated in one scene (M0 §3.3);
    the segmentation head cannot learn them from the other folds either.
 4. **Cost and deployment.** +0.3 M MACs and +396 parameters. The C runtime
-   already computes the 27-channel head map (the golden test and the
-   quantised model cover it; int8 pooled box mAP 52.2), but it does not yet
-   emit the per-cell argmax; that is a few lines in the decoder and is
-   left for the Pi milestone.
+   computes the 27-channel head map and, since 4 November, the per-cell
+   label map: `se_segment` / `se_segment_head` (M3 §2.5) take the argmax on
+   the real-valued channels in the Python operation order, and the golden
+   test checks the labels against the Python int8 model cell by cell (3 x
+   1350 cells, all equal, on `runs/small_360_seg_cv_f0`). `sonar-detect -s
+   DIR` writes one PGM label map per frame. The shipped `weights.h` is the
+   box-only 360x240 model (`SE_SEG_COUT` 0); exporting a `--seg` run instead
+   enables the functions with no other change.
 
 ## 5. Limitations
 
 - One seed for the segmentation CV; the box-only comparison has three.
+- The C label map is verified on the three golden frames and by the int8
+  mIoU of the Python reference; the C binary has not been scored for mIoU
+  over a whole fold (c_eval scores boxes only).
 - mIoU is measured at the working resolution (360x240) against the
   nearest-resized label map, not at the original 480x320.
 - weight_bg = 0.1 was chosen from a single comparison with 1.0, not swept.

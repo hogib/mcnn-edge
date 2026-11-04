@@ -75,9 +75,23 @@ Detections are inserted into a fixed-size array sorted by score.
 ```c
 int se_detect(const uint8_t *frame, float thr, se_detection_t *out, int max_out);
 const int32_t *se_forward(const uint8_t *frame);   /* int32 head map, HWC */
+int se_segment(const uint8_t *frame, uint8_t *labels);        /* M6 models: one label per cell */
+int se_segment_head(const int32_t *head, uint8_t *labels);    /* same, from a head map */
 ```
 
 Static buffers make the runtime non-reentrant; a Pi runs one detector.
+
+For models exported with the segmentation head of M6 (`SE_SEG_COUT` = 12 in
+`weights.h`; 0 for the shipped box-only model, in which case the two
+functions return -1), `se_segment_head` takes the per-cell argmax over the
+12 segmentation channels on their real values, `float32(float64(acc) *
+scale_c)`, with a strict comparison so that ties resolve to the first index
+as in `torch.argmax`. The label map is `SE_OUT_H x SE_OUT_W` bytes (0 =
+background, c + 1 = class c) and is upsampled by the stride outside the
+runtime. `sonar-detect -s DIR` writes it as a PGM per frame. The golden test
+compares the labels with the Python int8 model's cell by cell when the
+golden vectors carry them; on `runs/small_360_seg_cv_f0` all 3 x 1350 cells
+match.
 
 ## 3. Verification
 

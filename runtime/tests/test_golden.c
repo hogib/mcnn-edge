@@ -32,6 +32,16 @@ int main(void)
         printf("frame %d: %s (%ld mismatches, max |diff| %ld), %d detections, top: cls %d score %.3f\n",
                gold_frame_index[g], mism ? "FAIL" : "ok", mism, maxabs, n, n ? dets[0].cls : -1, n ? dets[0].score : 0.f);
         failed |= mism != 0;
+#if GOLD_HAS_SEG
+        {
+            static uint8_t labels[GOLD_HEAD_H * GOLD_HEAD_W];
+            long segmism = 0;
+            if (se_segment_head(hm, labels) != oh * ow) { printf("FAIL: se_segment_head\n"); failed = 1; }
+            for (long i = 0; i < (long)oh * ow; i++) segmism += labels[i] != gold_seg[(size_t)g * oh * ow + i];
+            printf("   segmentation labels: %s (%ld of %d cells differ)\n", segmism ? "FAIL" : "ok", segmism, oh * ow);
+            failed |= segmism != 0;
+        }
+#endif
     }
     printf(failed ? "GOLDEN TEST FAILED\n" : "golden test passed: C head map is bit-identical to Python for %d frames\n", GOLD_N);
     return failed;

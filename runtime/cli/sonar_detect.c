@@ -1,8 +1,11 @@
 /* sonar-detect: run the detector on PGM frames.
  *
- *   sonar-detect [-t THR] [-n REPEAT] frame.pgm [more.pgm ...]
+ *   sonar-detect [-t THR] [-n REPEAT] [-s DIR] frame.pgm [more.pgm ...]
  *
  * Prints one line per detection: "<file> <cls> <score> <x0> <y0> <x1> <y1>".
+ * With -s DIR (models with a segmentation head), the per-cell label map of
+ * each frame is written to DIR/<basename>.labels.pgm (P5, one byte per
+ * output cell, 0 = background, c + 1 = class c).
  * With -n REPEAT > 1, each frame is run REPEAT times and the mean wall time per
  * frame is printed to stderr (benchmark mode). Input must be binary PGM (P5),
  * maxval 255, of the compiled-in size.
@@ -38,10 +41,12 @@ int main(int argc, char **argv)
 {
     float thr = -4.0f;
     int repeat = 1, i = 1;
+    const char *segdir = NULL;
     for (; i < argc && argv[i][0] == '-'; i++) {
         if (!strcmp(argv[i], "-t") && i + 1 < argc) thr = (float)atof(argv[++i]);
         else if (!strcmp(argv[i], "-n") && i + 1 < argc) repeat = atoi(argv[++i]);
-        else { fprintf(stderr, "usage: %s [-t THR] [-n REPEAT] frame.pgm ...\n", argv[0]); return 2; }
+        else if (!strcmp(argv[i], "-s") && i + 1 < argc) segdir = argv[++i];
+        else { fprintf(stderr, "usage: %s [-t THR] [-n REPEAT] [-s DIR] frame.pgm ...\n", argv[0]); return 2; }
     }
     const int h = se_input_height(), w = se_input_width();
     uint8_t *frame = malloc((size_t)h * w);
@@ -61,6 +66,22 @@ int main(int argc, char **argv)
         for (int k = 0; k < n; k++)
             printf("%s %d %.6f %.3f %.3f %.3f %.3f\n", argv[i], dets[k].cls, dets[k].score,
                    dets[k].x0, dets[k].y0, dets[k].x1, dets[k].y1);
+        if (segdir) {
+            if (se_seg_classes() <= 0) { fprintf(stderr, "-s: the compiled-in model has no segmentation head\n"); return 1; }
+            const int oh = se_out_height(), ow = se_out_width();
+            uint8_t *labels = malloc((size_t)oh * ow);
+            se_segment_head(se_forward(frame), labels);
+            const char *base = strrchr(argv[i], '/');
+            base = base ? base + 1 : argv[i];
+            char path[4096];
+            snprintf(path, sizeof path, "%s/%s.labels.pgm", segdir, base);
+            FILE *f = fopen(path, "wb");
+            if (!f) { perror(path); free(labels); return 1; }
+            fprintf(f, "P5\n%d %d\n255\n", ow, oh);
+            fwrite(labels, 1, (size_t)oh * ow, f);
+            fclose(f);
+            free(labels);
+        }
     }
     if (repeat > 1 && runs) fprintf(stderr, "mean %.2f ms/frame over %ld runs\n", 1e3 * total_s / runs, runs);
     free(frame);

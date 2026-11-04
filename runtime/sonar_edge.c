@@ -24,6 +24,7 @@ int se_num_classes(void) { return SE_N_CLASSES; }
 int se_out_height(void) { return SE_OUT_H; }
 int se_out_width(void) { return SE_OUT_W; }
 int se_head_channels(void) { return SE_HEAD_COUT; }
+int se_seg_classes(void) { return SE_SEG_COUT; }
 
 /* (acc * M) >> shift, rounding half away from zero, clamped to uint8.
  * Identical to sonar_edge.quant.round_shift. */
@@ -116,6 +117,41 @@ static inline float head_real(int32_t acc, int c)
 static inline int32_t head_at(const int32_t *hm, int y, int x, int c)
 {
     return hm[((size_t)y * SE_OUT_W + x) * SE_HEAD_COUT + c];
+}
+
+/* Per-cell argmax over the segmentation channels, on the real values
+ * float32(float64(acc) * scale_c) like the Python reference (torch.argmax:
+ * first index on ties, hence the strict comparison). */
+int se_segment_head(const int32_t *hm, uint8_t *labels)
+{
+#if SE_SEG_COUT > 0
+    const int c0 = SE_N_CLASSES + 4;
+    for (int y = 0; y < SE_OUT_H; y++) {
+        for (int x = 0; x < SE_OUT_W; x++) {
+            int best = 0;
+            float bv = head_real(head_at(hm, y, x, c0), c0);
+            for (int c = 1; c < SE_SEG_COUT; c++) {
+                const float v = head_real(head_at(hm, y, x, c0 + c), c0 + c);
+                if (v > bv) { bv = v; best = c; }
+            }
+            labels[(size_t)y * SE_OUT_W + x] = (uint8_t)best;
+        }
+    }
+    return SE_OUT_H * SE_OUT_W;
+#else
+    (void)hm; (void)labels;
+    return -1;
+#endif
+}
+
+int se_segment(const uint8_t *frame, uint8_t *labels)
+{
+#if SE_SEG_COUT > 0
+    return se_segment_head(se_forward(frame), labels);
+#else
+    (void)frame; (void)labels;
+    return -1;
+#endif
 }
 
 int se_detect(const uint8_t *frame, float thr, se_detection_t *out, int max_out)

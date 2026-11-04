@@ -9,6 +9,7 @@
 #define SE_N_LAYERS 6
 #define SE_HEAD_COUT 15
 #define SE_HEAD_CIN 32
+#define SE_SEG_COUT 0
 #define SE_OUT_H 45
 #define SE_OUT_W 30
 #define SE_MAX_PAD 4

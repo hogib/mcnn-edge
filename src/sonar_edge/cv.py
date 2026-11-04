@@ -92,6 +92,13 @@ def cmd_cv(args):
         out["seg"] = {"miou_pooled": float(np.nanmean(iou)), "miou_fg_pooled": float(np.nanmean(iou[1:])),
                       "iou_pooled": {c: (None if np.isnan(v) else float(v)) for c, v in zip(names, iou)},
                       "miou_per_fold": [r["test"]["seg"]["miou"] for r in results]}
+        qres = [json.loads((r / "quant_results.json").read_text()) for r in runs if (r / "quant_results.json").exists()]
+        if len(qres) == len(runs) and all("seg" in q["test"] for q in qres):  # int8 masks (quantize after M6)
+            conf8 = np.sum([np.array(q["test"]["seg"]["confusion"]) for q in qres], axis=0)
+            iou8 = seg_iou(conf8)
+            out["seg"]["int8"] = {"miou_pooled": float(np.nanmean(iou8)), "miou_fg_pooled": float(np.nanmean(iou8[1:])),
+                                  "iou_pooled": {c: (None if np.isnan(v) else float(v)) for c, v in zip(names, iou8)},
+                                  "miou_per_fold": [q["test"]["seg"]["miou_int8"] for q in qres]}
 
     cols = [n for n in variants if n in out]
     print(f"{args.k}-fold CV, {args.prefix}, scale {scale}, {out['n_test_frames']} test frames")
@@ -105,11 +112,14 @@ def cmd_cv(args):
     for v in cols:
         print(f"  {v} per fold: " + " ".join(f"{100 * x:.1f}" for x in out[v]["map_per_fold"]))
     if "seg" in out:
-        print(f"{'segmentation IoU':18s}{'':7s}{'pooled':>9s}")
-        for c, v in out["seg"]["iou_pooled"].items():
-            print(f"{c:18s}{'':7s}{'n/a' if v is None else f'{100 * v:9.1f}':>9s}")
-        print(f"{'mIoU pooled':18s}{'':7s}{100 * out['seg']['miou_pooled']:9.1f}   (foreground {100 * out['seg']['miou_fg_pooled']:.1f})")
-        print("  mIoU per fold: " + " ".join(f"{100 * x:.1f}" for x in out["seg"]["miou_per_fold"]))
+        segs = [("float", out["seg"])] + ([("int8", out["seg"]["int8"])] if "int8" in out["seg"] else [])
+        print(f"{'segmentation IoU':18s}{'':7s}" + "".join(f"{n:>9s}" for n, _ in segs))
+        for c in out["seg"]["iou_pooled"]:
+            print(f"{c:18s}{'':7s}" + "".join(f"{'n/a' if o['iou_pooled'][c] is None else f'{100 * o['iou_pooled'][c]:9.1f}':>9s}" for _, o in segs))
+        print(f"{'mIoU pooled':18s}{'':7s}" + "".join(f"{100 * o['miou_pooled']:9.1f}" for _, o in segs)
+              + "   (foreground " + ", ".join(f"{100 * o['miou_fg_pooled']:.1f}" for _, o in segs) + ")")
+        for n, o in segs:
+            print(f"  {n} mIoU per fold: " + " ".join(f"{100 * x:.1f}" for x in o["miou_per_fold"]))
     dest = prefix.parent / f"{prefix.name}_cv.json"
     dest.write_text(json.dumps(out, indent=1))
     print(f"wrote {dest.relative_to(ROOT)}")

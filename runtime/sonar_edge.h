@@ -32,3 +32,16 @@ const int32_t *se_forward(const uint8_t *frame);
 int se_out_height(void);
 int se_out_width(void);
 int se_head_channels(void);
+
+/* Semantic segmentation (models exported with a segmentation head, M6).
+ * se_seg_classes() is the number of label channels (0 = background,
+ * c + 1 = detector class c), or 0 when the compiled-in model has none.
+ * se_segment() runs the network and writes one label per output cell to
+ * labels[] (row-major, se_out_height() x se_out_width()); upsample by the
+ * stride to get a working-resolution mask. Returns the number of cells
+ * written, or -1 when the model has no segmentation head.
+ * se_segment_head() does the same from a head map returned by se_forward(),
+ * so boxes and labels can share one forward pass. */
+int se_seg_classes(void);
+int se_segment(const uint8_t *frame, uint8_t *labels);
+int se_segment_head(const int32_t *head, uint8_t *labels);

@@ -11910,3 +11910,4 @@ static const int32_t gold_head[60750] = {
 static const int32_t gold_frame_index[3] = {
   0, 943, 1865,
 };
+#define GOLD_HAS_SEG 0
