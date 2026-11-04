@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .dataset import dev_datasets
@@ -42,18 +43,45 @@ def run_eval(model, ds, device, classes):
     return aps, m, pred
 
 
+@torch.no_grad()
+def seg_confusion(model, ds, device, bs=16):
+    """(C+1)x(C+1) confusion matrix [true, pred] of the per-pixel labels at working scale:
+    the per-cell argmax is nearest-upsampled by the stride and compared with the full label map."""
+    model.eval()
+    n = model.n_classes + 1
+    conf = torch.zeros(n, n, dtype=torch.int64, device=device)
+    pos = {f.index: i for i, f in enumerate(ds.frames)}
+    dl = DataLoader(ds, bs, shuffle=False, num_workers=0)
+    for batch in dl:
+        logits = model.split_seg(model(batch["image"].to(device)))
+        pred = logits.argmax(1).repeat_interleave(model.stride, 1).repeat_interleave(model.stride, 2)
+        for b, idx in enumerate(batch["index"].tolist()):
+            gt = torch.from_numpy(ds.seg_mask(pos[idx]).astype(np.int64)).to(device)
+            p = pred[b, : gt.shape[0], : gt.shape[1]]
+            conf += torch.bincount(gt.flatten() * n + p.flatten(), minlength=n * n).view(n, n)
+    return conf.cpu().numpy()
+
+
+def seg_iou(conf):
+    """Per-class IoU (background first) from a confusion matrix; NaN where the class is absent."""
+    tp = np.diag(conf).astype(float)
+    union = conf.sum(0) + conf.sum(1) - np.diag(conf)
+    return np.where(union > 0, tp / np.maximum(union, 1), np.nan)
+
+
 def cmd_train(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(args.seed)
-    model = Detector(config=args.config).to(device)
-    ds, classes = dev_datasets(model.stride, args.scale, args.test_fold, args.val_fold, args.seed, args.aug)
+    model = Detector(config=args.config, seg=args.seg).to(device)
+    ds, classes = dev_datasets(model.stride, args.scale, args.test_fold, args.val_fold, args.seed, args.aug, seg=args.seg)
     if args.limit:
         for d in ds.values():
             d.frames = d.frames[: args.limit]
             d.images = d.images[: args.limit]
     out = ROOT / args.out
     out.mkdir(parents=True, exist_ok=True)
-    print(f"config {args.config} scale {args.scale}: {sum(p.numel() for p in model.parameters()):,} params, "
+    print(f"config {args.config} scale {args.scale}{' +seg' if args.seg else ''}: "
+          f"{sum(p.numel() for p in model.parameters()):,} params, "
           f"{macs(model, ds['train'].h, ds['train'].w) / 1e6:.1f}M MACs/frame, stride {model.stride}, "
           f"train/val/test {len(ds['train'])}/{len(ds['val'])}/{len(ds['test'])}, device {device}")
     dl = DataLoader(ds["train"], args.bs, shuffle=True, num_workers=0, drop_last=True)
@@ -62,29 +90,34 @@ def cmd_train(args):
     best, log = -1.0, []
     for ep in range(args.epochs):
         model.train()
-        t0, tot = time.time(), np.zeros(3)
+        t0, tot = time.time(), np.zeros(4)
         for batch in dl:
             b = {k: v.to(device) for k, v in batch.items() if k != "index"}
-            heat, size, off = model.split(model(b["image"]))
+            o = model(b["image"])
+            heat, size, off = model.split(o)
             l_heat = focal_loss(heat, b["heat"])
             l_size = reg_l1(size, b["ind"], b["size"], b["mask"])
             l_off = reg_l1(off, b["ind"], b["off"], b["mask"])
-            loss = l_heat + 0.1 * l_size + l_off
+            l_seg = F.cross_entropy(model.split_seg(o), b["seg"]) if args.seg else torch.zeros((), device=device)
+            loss = l_heat + 0.1 * l_size + l_off + args.seg_w * l_seg
             opt.zero_grad()
             loss.backward()
             opt.step()
             sched.step()
-            tot += (l_heat.item(), l_size.item(), l_off.item())
+            tot += (l_heat.item(), l_size.item(), l_off.item(), l_seg.item())
         tot /= len(dl)
         aps, m, _ = run_eval(model, ds["val"], device, classes)
-        log.append({"epoch": ep + 1, "loss_heat": tot[0], "loss_size": tot[1], "loss_off": tot[2], "val_map": m})
+        miou = float(np.nanmean(seg_iou(seg_confusion(model, ds["val"], device)))) if args.seg else None
+        log.append({"epoch": ep + 1, "loss_heat": tot[0], "loss_size": tot[1], "loss_off": tot[2],
+                    "loss_seg": tot[3], "val_map": m, "val_miou": miou})
         flag = ""
         if m > best:
             best = m
-            torch.save({"model": model.state_dict(), "config": args.config, "scale": args.scale,
+            torch.save({"model": model.state_dict(), "config": args.config, "scale": args.scale, "seg": args.seg,
                         "classes": classes, "epoch": ep + 1, "val_map": m}, out / "best.pt")
             flag = " *"
-        print(f"ep {ep + 1:3d}  heat {tot[0]:.3f} size {tot[1]:.3f} off {tot[2]:.3f}  "
+        segtxt = f" seg {tot[3]:.3f} val mIoU {100 * miou:5.1f}" if args.seg else ""
+        print(f"ep {ep + 1:3d}  heat {tot[0]:.3f} size {tot[1]:.3f} off {tot[2]:.3f}{segtxt}  "
               f"val mAP {100 * m:5.1f}  ({time.time() - t0:.0f}s){flag}", flush=True)
     (out / "log.json").write_text(json.dumps(log, indent=1))
     ck = torch.load(out / "best.pt", map_location=device, weights_only=False)
@@ -102,6 +135,15 @@ def report(model, ds, device, classes, out, epoch):
             n = sum(sum(g[0] == i for g in gs) for gs in ds[split].gt_boxes().values() for i in [classes.index(c)])
             print(f"   {c:16s} {'  n/a' if np.isnan(a) else f'{100 * a:5.1f}'}  ({n} boxes)")
         (out / f"pred_{split}.json").write_text(json.dumps({str(k): v for k, v in pred.items()}))
+        if model.seg:
+            conf = seg_confusion(model, ds[split], device)
+            iou = seg_iou(conf)
+            res[split]["seg"] = {"miou": float(np.nanmean(iou)), "miou_fg": float(np.nanmean(iou[1:])),
+                                 "iou": {c: (None if np.isnan(v) else float(v)) for c, v in zip(["Background"] + classes, iou)},
+                                 "confusion": conf.tolist()}
+            print(f"{split}: mIoU {100 * np.nanmean(iou):.1f} (foreground classes {100 * np.nanmean(iou[1:]):.1f})")
+            for c, v in zip(["Background"] + classes, iou):
+                print(f"   {c:16s} {'  n/a' if np.isnan(v) else f'{100 * v:5.1f}'}")
     (out / "results.json").write_text(json.dumps(res, indent=1))
 
 
@@ -111,7 +153,7 @@ def cmd_quantize(args):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     ck = torch.load(ROOT / args.checkpoint, map_location=device, weights_only=False)
-    model = Detector(config=ck["config"]).to(device).eval()
+    model = Detector(config=ck["config"], seg=ck.get("seg", False)).to(device).eval()
     model.load_state_dict(ck["model"])
     ds, classes = dev_datasets(model.stride, ck["scale"], args.test_fold, args.val_fold)
     out = (ROOT / args.checkpoint).parent
@@ -165,9 +207,9 @@ def _cmd_cv(args):
 def cmd_eval(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     ck = torch.load(ROOT / args.checkpoint, map_location=device, weights_only=False)
-    model = Detector(config=ck["config"]).to(device)
+    model = Detector(config=ck["config"], seg=ck.get("seg", False)).to(device)
     model.load_state_dict(ck["model"])
-    ds, classes = dev_datasets(model.stride, ck["scale"], args.test_fold, args.val_fold)
+    ds, classes = dev_datasets(model.stride, ck["scale"], args.test_fold, args.val_fold, seg=model.seg)
     report(model, ds, device, classes, (ROOT / args.checkpoint).parent, ck["epoch"])
 
 
@@ -194,6 +236,8 @@ def main():
     t.add_argument("--lr", type=float, default=2e-3)
     t.add_argument("--seed", type=int, default=0)
     t.add_argument("--aug", choices=["basic", "strong"], default="basic")
+    t.add_argument("--seg", action="store_true", help="add a per-cell semantic segmentation head (needs Masks/)")
+    t.add_argument("--seg-w", type=float, default=1.0, help="weight of the segmentation cross-entropy")
     t.add_argument("--limit", type=int, default=0, help="use only N frames per split (smoke test)")
     t.add_argument("--out", default="runs/dev")
     folds(t)

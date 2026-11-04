@@ -7,6 +7,7 @@ Output stride 8: a 480x320 frame gives a 60x40 grid. Heads per cell:
   [0:C]      class heatmap logits (C = n_classes)
   [C:C+2]    box size (w, h) in units of stride
   [C+2:C+4]  centre offset (dx, dy) within the cell, in [0, 1)
+  [C+4:2C+5] optional semantic-segmentation logits per cell (background + C classes), seg=True
 """
 
 import torch
@@ -35,17 +36,18 @@ class ConvBNReLU(nn.Sequential):
 
 
 class Detector(nn.Module):
-    def __init__(self, n_classes=11, config="base"):
+    def __init__(self, n_classes=11, config="base", seg=False):
         super().__init__()
         self.n_classes = n_classes
         self.config = config
+        self.seg = seg
         layers, cin = [], 1
         self.stride = 1
         for cout, s, d in CONFIGS[config]:
             layers.append(ConvBNReLU(cin, cout, s, d))
             cin, self.stride = cout, self.stride * s
         self.backbone = nn.Sequential(*layers)
-        self.head = nn.Conv2d(cin, n_classes + 4, 1)
+        self.head = nn.Conv2d(cin, n_classes + 4 + (n_classes + 1 if seg else 0), 1)
         # CenterNet init: heatmap bias so initial p ~ 0.01, keeps focal loss stable
         nn.init.zeros_(self.head.weight)
         with torch.no_grad():
@@ -58,6 +60,11 @@ class Detector(nn.Module):
     def split(self, out):
         C = self.n_classes
         return out[:, :C], out[:, C : C + 2], out[:, C + 2 : C + 4]
+
+    def split_seg(self, out):
+        """[B, C+1, gh, gw] segmentation logits (channel 0 = background)."""
+        assert self.seg
+        return out[:, self.n_classes + 4 :]
 
 
 def macs(model: Detector, h=480, w=320) -> int:

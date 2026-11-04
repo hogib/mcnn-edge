@@ -15,7 +15,7 @@ N = 48
 
 def analyse(run, k):
     ck = torch.load(f"runs/{run}_f{k}/best.pt", map_location=dev, weights_only=False)
-    model = Detector(config=ck["config"]).to(dev).eval(); model.load_state_dict(ck["model"])
+    model = Detector(config=ck["config"], seg=ck.get("seg", False)).to(dev).eval(); model.load_state_dict(ck["model"])
     q = json.load(open(f"runs/{run}_f{k}/quant_results.json"))
     im = IntDetector(model, q["act_scales"])
     ds, _ = dev_datasets(model.stride, ck["scale"], k, (k + 1) % 5)

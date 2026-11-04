@@ -67,7 +67,7 @@ def main():
     run = ROOT / args.run
     import torch
     ck = torch.load(run / "best.pt", map_location="cpu", weights_only=False)
-    model = Detector(config=ck["config"])
+    model = Detector(config=ck["config"], seg=ck.get("seg", False))
     ds, classes = dev_datasets(model.stride, ck["scale"], args.test_fold, args.val_fold)
     d = ds[args.split]
     paths = export_pgm(d, run / "pgm" / args.split)

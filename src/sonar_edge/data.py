@@ -37,10 +37,16 @@ class Frame:
     index: int
     image_path: Path
     boxes: list[Box]
+    mask_path: Path | None = None  # semantic label PNG: 0 background, 1..11 = classes in sorted order
 
     def load(self) -> np.ndarray:
         """HxW uint8."""
         return np.asarray(Image.open(self.image_path).convert("L"))
+
+    def load_mask(self) -> np.ndarray:
+        """HxW uint8 label map (0 = background, c+1 = class index c of class_names)."""
+        assert self.mask_path is not None, f"no mask for frame {self.index} (fetch Masks/ into the sparse checkout)"
+        return np.asarray(Image.open(self.mask_path))
 
 
 def _frame_index(path: Path) -> int:
@@ -67,7 +73,8 @@ def load_frames(root: Path = DATA_ROOT) -> list[Frame]:
         assert wh == (FRAME_W, FRAME_H), (xml, wh)
         img = root / "Images" / fn
         assert img.exists(), img
-        frames.append(Frame(_frame_index(xml), img, boxes))
+        mask = root / "Masks" / fn
+        frames.append(Frame(_frame_index(xml), img, boxes, mask if mask.exists() else None))
     assert [f.index for f in frames] == list(range(len(frames))), "non-contiguous frame indices"
     return frames
 

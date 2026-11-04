@@ -81,7 +81,17 @@ def cmd_cv(args):
             "map_fold_std": float(np.std(per_fold, ddof=1)) if len(per_fold) > 1 else None,
         }
     out["n_test_boxes"] = n_boxes
-    out["best_epoch_per_fold"] = [json.loads((r / "results.json").read_text())["epoch"] for r in runs]
+    results = [json.loads((r / "results.json").read_text()) for r in runs]
+    out["best_epoch_per_fold"] = [r["epoch"] for r in results]
+    if all("seg" in r["test"] for r in results):  # pooled mIoU: sum the per-fold confusion matrices
+        from .train import seg_iou
+
+        conf = np.sum([np.array(r["test"]["seg"]["confusion"]) for r in results], axis=0)
+        iou = seg_iou(conf)
+        names = ["Background"] + classes
+        out["seg"] = {"miou_pooled": float(np.nanmean(iou)), "miou_fg_pooled": float(np.nanmean(iou[1:])),
+                      "iou_pooled": {c: (None if np.isnan(v) else float(v)) for c, v in zip(names, iou)},
+                      "miou_per_fold": [r["test"]["seg"]["miou"] for r in results]}
 
     cols = [n for n in variants if n in out]
     print(f"{args.k}-fold CV, {args.prefix}, scale {scale}, {out['n_test_frames']} test frames")
@@ -94,6 +104,12 @@ def cmd_cv(args):
         print(f"{'mAP fold std':18s}{'':7s}" + "".join(f"{100 * out[v]['map_fold_std']:9.1f}" for v in cols))
     for v in cols:
         print(f"  {v} per fold: " + " ".join(f"{100 * x:.1f}" for x in out[v]["map_per_fold"]))
+    if "seg" in out:
+        print(f"{'segmentation IoU':18s}{'':7s}{'pooled':>9s}")
+        for c, v in out["seg"]["iou_pooled"].items():
+            print(f"{c:18s}{'':7s}{'n/a' if v is None else f'{100 * v:9.1f}':>9s}")
+        print(f"{'mIoU pooled':18s}{'':7s}{100 * out['seg']['miou_pooled']:9.1f}   (foreground {100 * out['seg']['miou_fg_pooled']:.1f})")
+        print("  mIoU per fold: " + " ".join(f"{100 * x:.1f}" for x in out["seg"]["miou_per_fold"]))
     dest = prefix.parent / f"{prefix.name}_cv.json"
     dest.write_text(json.dumps(out, indent=1))
     print(f"wrote {dest.relative_to(ROOT)}")

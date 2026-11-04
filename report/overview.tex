@@ -49,6 +49,15 @@ debris, but it is excluded from the scene matching of
 Section~\ref{sec:split} because walls are static and link unrelated
 recordings.
 
+The frames are the complete sonar images, not object crops. The same
+collection also provides \texttt{watertank-cropped} (2\,364 object patches cut
+from these frames, used by the MCNN paper and by the predecessor study
+\texttt{sonar\_cnn}, which showed that the crop size alone predicts the class
+there) and a \texttt{turntable-cropped} set of objects on a rotating table;
+neither is used here. Pixel-level semantic labels (values 0--11, background
+plus the eleven classes, LabelMe) exist for every frame and were fetched on
+4 November for a possible segmentation extension (Section~\ref{sec:next}).
+
 The frames come from a small number of recordings in which the sonar drifts
 slowly over a fixed arrangement of objects, so consecutive frames are
 near-duplicates. The published frame indices carry no temporal information:
@@ -485,6 +494,11 @@ per-class average precision. All runs: 150 epochs, strong augmentation, seed
   \label{tab:cvclass}
 \end{table}
 
+\subsection{Seed variability}
+\label{sec:seeds}
+
+%%SEEDTABLE%%
+
 \section{Discussion}
 
 \paragraph{Protocol.} Pooled cross-validation values are 10--15 points below
@@ -542,6 +556,27 @@ was chance; quantisation is neutral within noise for all configurations,
 and the quantised $360 \times 240$ models are 3.1--4.0 pooled points above the
 deployed one.
 
+\paragraph{Low-performing classes.} Three classes stay well below the rest
+under every configuration, for different reasons. \emph{Standing-bottle}
+(65 boxes) has 94\% of its instances in one scene; under the scene-fold
+protocol that scene is the test set of one run whose training set holds four
+instances, so its AP (1--10) measures the dataset, not the model, and a
+random frame split would hide this. \emph{Can} (292 boxes, median
+$40 \times 40$ px) and \emph{drink-carton} ($27 \times 30$ px) are the
+smallest objects; at half resolution they approach the 8-pixel output stride,
+and raising the input to $360 \times 240$ lifts can from 9 to 16 and
+drink-carton from 62 to 70. \emph{Valve} (240 boxes, 66\% in one scene) and
+\emph{shampoo-bottle} (111 boxes) rest on few scenes and move by 15--30
+points between seeds (Table~\ref{tab:seeds}), so their single-run values
+carry little information. The measures available, in order of cost:
+(i)~sampling frames that contain rare classes more often, or weighting the
+focal loss per class; (ii)~copy--paste augmentation, pasting annotated
+rare objects (with their masks, which the dataset provides) into other
+frames, which is plausible for sonar because objects are compact on a dark
+background; (iii)~an output stride of 4 instead of 8 for the small classes,
+at about twice the compute. None of these can create training instances of
+standing-bottle outside its scene; that class is reported as a limitation.
+
 \paragraph{Pooled per-class values.} Pooled AP depends on the score
 calibration of the individual fold models, since detections from all five
 are ranked on one list. The bottle AP of \cfg{small\_wide} (55.9 against 78.0
@@ -549,6 +584,33 @@ for \cfg{small}) is an example: its per-fold bottle AP is 36, 78, 54, 84 and
 84, and the one poorly calibrated fold-0 model depresses the pooled value by
 more than its share of the boxes. This is why the per-fold values are
 reported next to the pooled ones.
+
+\section{Hardware validation and next steps}
+\label{sec:next}
+
+\paragraph{Raspberry Pi (M5).} The runtime is built on the device with
+\texttt{make} (gcc and make only) or cross-compiled with \texttt{make
+CC=aarch64-linux-gnu-gcc}. The plan: (i)~\texttt{make test} on the Pi, which
+must reproduce the golden head maps bit for bit, as the arithmetic is
+integer-only and platform-independent; (ii)~latency with \texttt{sonar-detect
+-n} over the 439 development test frames, reporting mean and 95th percentile
+per frame for the deployed $240 \times 160$ model and the $360 \times 240$
+candidate, single core, then with the optional NEON inner loop;
+(iii)~energy with an inline USB-C power meter (or an INA219 on the 5~V rail)
+sampled at 1~Hz, as the difference between loaded and idle power divided by
+the frame rate, giving joules per frame, plus the idle baseline of the board.
+Expected values from the laptop measurement are 35--50~ms per frame for the
+deployed model and 80--110~ms for $360 \times 240$ on a Pi~4; these are
+estimates until measured. The hardware was not available at the time of
+writing.
+
+\paragraph{Segmentation.} The pixel labels make a multi-task extension
+possible at almost no runtime cost: a second $1 \times 1$ head of $C + 1$
+channels on the same stride-8 features, trained with per-cell cross-entropy
+against the downsampled mask, evaluated as mean IoU at full resolution after
+nearest upsampling, and executed in the runtime as one \texttt{argmax} per
+cell. Whether the shared features also improve the boxes is an empirical
+question for the same cross-validation protocol.
 
 \section{Conclusions and open items}
 
