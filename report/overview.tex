@@ -561,12 +561,15 @@ this representation: 77.2 mIoU on the development test fold.
 \begin{table}[h]
   \centering
   \small
-  \begin{tabular}{lccccc}
+  \begin{tabular}{lcc}
     \toprule
-    Model, $360 \times 240$ & Box mAP, pooled & Box mAP per fold & mIoU, pooled & mIoU, objects & mIoU per fold \\
+    \cfg{small}, $360 \times 240$ & boxes only, 3 seeds & + segmentation head \\
     \midrule
-    boxes only, 3 seeds & 52.6 (1.9) & 61.0, 65.1, 52.2, 48.2, 67.5 & -- & -- & -- \\
-    + segmentation head & 52.1 & 61.7, 67.6, 48.2, 48.7, 66.3 & 33.9 & 28.2 & 34.0, 39.9, 29.8, 24.2, 35.1 \\
+    Box mAP, pooled & 52.6 (1.9) & 52.1 \\
+    Box mAP per fold & 61.0, 65.1, 52.2, 48.2, 67.5 & 61.7, 67.6, 48.2, 48.7, 66.3 \\
+    mIoU, pooled & -- & 33.9 \\
+    mIoU, object classes & -- & 28.2 \\
+    mIoU per fold & -- & 34.0, 39.9, 29.8, 24.2, 35.1 \\
     \bottomrule
   \end{tabular}
   \caption{Five-fold cross-validation with the segmentation head (seed 0;
