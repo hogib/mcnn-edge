@@ -462,7 +462,7 @@ per-class average precision. All runs: 150 epochs, strong augmentation, seed
     \cfg{small}, $360{\times}240$, seed 1 & 78 M & 52.2 & 52.8 & 58.1 (9.6) & 61.0, 66.2, 49.2, 46.7, 67.5 \\
     \cfg{small}, $480{\times}320$ & 139 M & 54.1 & 53.9 & 61.6 (9.8) & 64.9, 65.8, 57.6, 47.0, 72.7 \\
     \cfg{small\_wide} & 90 M & 50.2 & 49.6 & 58.0 (11.9) & 60.1, 63.3, 51.1, 42.2, 73.4 \\
-    \cfg{small\_wide}, $360{\times}240$ & 204 M & 59.0 & 58.8 & 65.7 (7.7) & 70.4, 72.2, 59.2, 55.5, 71.3 \\
+    \cfg{small\_wide}, $360{\times}240$, 2 seeds & 204 M & 59.0, 53.9 & 58.8, 53.7 & 65.7 (7.7), 61.4 (6.5) & 70.4, 72.2, 59.2, 55.5, 71.3; 64.4, 65.6, 57.4, 52.0, 67.8 \\
     \cfg{wide} & 450 M & 55.2 & 56.2 & 62.8 (8.3) & 66.9, 68.6, 55.7, 52.1, 70.5 \\
     \bottomrule
   \end{tabular}
@@ -668,14 +668,18 @@ better than $360 \times 240$ ($-0.5$; per-fold $+0.9$, $-0.7$, $+5.3$, $0.0$,
 $+5.0$) and 1.1 below \cfg{wide}, so the resolution curve of the \cfg{small}
 network is 49.4, 54.6, 54.1 for 35, 78, 139~M MACs and saturates at
 $360 \times 240$. The two factors interact, however: the 64-channel
-\cfg{small\_wide} stack, worth $+0.8$ at $240 \times 160$, is worth $+6.4$
-at $360 \times 240$ (59.0 pooled, above every \cfg{small} seed on every
-fold) and there exceeds \cfg{wide} at $480 \times 320$ by 3.8 points on
-every fold at 45\% of its compute (204~M MACs). The 32-channel stack is the
-bottleneck once the input carries the small objects; standing-bottle, for
-instance, reaches 39.6 AP against 6.4 and 24.1. At 2.6$\times$ the deployed
-cost this is the new accuracy reference rather than a deployment candidate
-(one seed; a repeat is running at the time of writing).
+\cfg{small\_wide} stack, worth $+0.8$ at $240 \times 160$, is worth $+3.8$
+at $360 \times 240$ on a two-seed mean (56.4 $\pm$ 3.6 against 52.6 $\pm$
+1.9), with every fold mean up by 0.3 to 6.6, and it equals or exceeds
+\cfg{wide} at $480 \times 320$ (55.2, one seed) at 45\% of its compute
+(204~M MACs). The two seeds differ by 5.1 points (59.0 and 53.9), the
+largest seed spread observed, carried by the pooled-AP-sensitive classes
+(standing-bottle 39.6 against 13.6, bottle 86.6 against 76.6); the stable
+gains are drink-carton (85.6 and 83.9, from 63.1) and tire. The 32-channel
+stack therefore limits the deployed model once the input carries the small
+objects, by an amount that a third seed would pin down. At 2.6$\times$ the
+deployed cost this is the accuracy reference rather than a deployment
+candidate.
 
 \paragraph{Quantisation.} Post-training 8-bit quantisation is neutral for
 \cfg{small} and \cfg{wide} (pooled $+0.3$ and $+1.0$). For \cfg{small\_wide}
@@ -799,9 +803,9 @@ feature branch for the masks.
   \item Input resolution is what the deployed network gains from, and the
   gain saturates at $360 \times 240$; this is why the deployed resolution
   was raised on 4 November. Width pays only once the resolution is there:
-  the 64-channel stack at $360 \times 240$ reaches 59.0 pooled mAP (one
-  seed), above the 13$\times$ costlier \cfg{wide} on every fold, at 204~M
-  MACs, and is the new accuracy reference.
+  the 64-channel stack at $360 \times 240$ reaches 56.4 $\pm$ 3.6 pooled
+  mAP over two seeds, at least the equal of the 13$\times$ costlier
+  \cfg{wide}, at 204~M MACs, and is the accuracy reference.
   The deployment change needed only a regenerated weight header, since the
   runtime takes its geometry from that header.
   \item A segmentation head on the same features costs 0.3~M MACs, leaves
@@ -814,11 +818,12 @@ feature branch for the masks.
   ceilings are 77 and 87, so the loss and the features, not the output
   resolution, are what limits the masks. The C runtime emits the label map
   for all variants, bit-exact with the Python int8 model.
-  \item Open: seed repeats of \cfg{wide}, \cfg{small\_wide} at both
-  resolutions, the $480 \times 320$ run and the segmentation models other
-  than Dice-1, which have one seed each (about $\pm 2$ points); a
-  48-channel stack at $360 \times 240$ (about 140~M MACs) as the point
-  between the deployed model and the new reference;
+  \item Open: seed repeats of \cfg{wide}, \cfg{small\_wide} at
+  $240 \times 160$, the $480 \times 320$ run and the segmentation models
+  other than Dice-1, which have one seed each (about $\pm 2$ points), and
+  a third seed of \cfg{small\_wide} at $360 \times 240$ (two seeds 5
+  points apart); a 48-channel stack at $360 \times 240$ (about 140~M MACs)
+  as the point between the deployed model and the reference;
   the latency and energy measurement on the Raspberry Pi (M5), for which
   the runtime cross-compiles with \texttt{make CC=aarch64-linux-gnu-gcc}.
   \item Known limits of the evaluation: three seeds for two

@@ -499,39 +499,46 @@ seed 0) closes that gap:
 | small, 240x160 (3 seeds) | 35 M | 48.1 +- 1.1 | 48.1 | 55.5, 58.5, 48.9, 42.5, 67.4 (means) |
 | small_wide, 240x160 | 90 M | 50.2 | 49.6 | 60.1, 63.3, 51.1, 42.2, 73.4 |
 | small, 360x240 (3 seeds, shipped) | 78 M | 52.6 +- 1.9 | 52.3 | 61.0, 65.1, 52.2, 48.2, 67.5 (means) |
-| **small_wide, 360x240** | 204 M | **59.0** | **58.8** | 70.4, 72.2, 59.2, 55.5, 71.3 |
+| small_wide, 360x240, seed 0 | 204 M | 59.0 | 58.8 | 70.4, 72.2, 59.2, 55.5, 71.3 |
+| small_wide, 360x240, seed 1 | 204 M | 53.9 | 53.7 | 64.4, 65.6, 57.4, 52.0, 67.8 |
+| **small_wide, 360x240, mean (s.d.)** | 204 M | **56.4 (3.6)** | **56.3 (3.6)** | 67.4, 68.9, 58.3, 53.8, 69.5 (means) |
 | wide, 480x320 | 450 M | 55.2 | 56.2 | 66.9, 68.6, 55.7, 52.1, 70.5 |
 
-Best epochs 72, 114, 113, 77, 63. Per class (pooled float): bottle 86.6,
-can 19.6, chain 34.1, drink-carton 85.6, hook 95.3, propeller 50.8,
-shampoo-bottle 36.6, standing-bottle 39.6, tire 91.9, valve 25.4, wall 83.2.
+Best epochs 72, 114, 113, 77, 63 (seed 0) and 87, 109, 111, 104, 67 (seed
+1). Per class (pooled float, seed 0 / seed 1): bottle 86.6 / 76.6, can 19.6
+/ 14.9, chain 34.1 / 30.4, drink-carton 85.6 / 83.9, hook 95.3 / 90.5,
+propeller 50.8 / 53.3, shampoo-bottle 36.6 / 33.9, standing-bottle 39.6 /
+13.6, tire 91.9 / 95.6, valve 25.4 / 18.1, wall 83.2 / 82.2.
 
 **Discussion.**
 
-1. **Width and resolution interact.** At 240x160 the extra channels buy
-   +0.8 (noise); at 360x240 the same extra channels buy +6.4 over the
-   three-seed mean of `small`, and the run is above every `small` fold mean
-   by 3.8 to 9.4 points and above every one of the nine `small` seed
-   values. The conclusion of Section 6.3 holds as stated, width *without*
-   resolution does not help, but its generalisation in Section 6.4, item 4,
-   that the last point of `wide` "is what its doubled channels buy at full
-   resolution", was wrong: the channels are worth more at 360x240 than at
-   480x320, and `small_wide` at 360x240 is 3.8 pooled points above `wide`
-   at 480x320 on every fold (by 0.8 to 3.5) at 45% of its compute. The
-   reading is that the 32-channel stack is the bottleneck once the input
-   carries the small objects, and that at 480x320 the 60x40 grid with a
-   254 px receptive field is no longer the best use of the same channels.
-2. **The gains are where the small classes are.** Standing-bottle reaches
-   39.6 (from 6.4 +- 2.9 for `small` at 360x240 and 24.1 for `wide`),
-   drink-carton 85.6 (from 63.1), can 19.6 (from 15.3), shampoo-bottle 36.6
-   (from 33.3), tire 91.9 (from 89.3); chain (34.1 from 39.6) and valve
-   (25.4 from 26.5) are flat within their seed spread.
+1. **Width and resolution interact, by about +4 points with a wide
+   margin.** At 240x160 the extra channels buy +0.8 (noise); at 360x240
+   they buy +3.8 over the three-seed mean of `small` on the two-seed mean,
+   and every fold mean is up (by 0.3 to 6.6). The two seeds differ by 5.1
+   pooled points (59.0 and 53.9), twice the spread seen for `small`, so the
+   gain is established in sign but not in size: seed 0 is above every
+   `small` seed on every fold, seed 1 (53.9) falls inside the `small` seed
+   range (51.0-54.6) although it is above every `small` fold mean. The
+   conclusion of Section 6.3 holds as stated, width *without* resolution
+   does not help; the sentence in Section 6.4, item 4, that the last point
+   of `wide` "is what its doubled channels buy at full resolution" is
+   superseded, since the same channels at 360x240 give 56.4 +- 3.6 against
+   55.2 for `wide` at 480x320 (one seed) at 45% of its compute, i.e. at
+   least as much.
+2. **The seed spread is in the pooled-AP-sensitive classes.** Between the
+   two seeds, standing-bottle moves from 39.6 to 13.6, bottle from 86.6 to
+   76.6 and valve from 25.4 to 18.1; drink-carton (85.6 / 83.9, from 63.1
+   for `small`), tire (91.9 / 95.6, from 89.3) and hook (95.3 / 90.5) are
+   the stable gains. The seed-0 run was at the top of its spread, as the
+   seed-0 runs of Section 6.5 were.
 3. **It is not a deployment candidate as it stands.** 204 M MACs is 2.6x
    the shipped model and twice the plan's budget: about 52 ms per frame on
-   the laptop by the M3 throughput, 180-260 ms on a Pi 4. It replaces
-   `wide` as the accuracy reference. A 48-channel stack at 360x240 (about
-   140 M MACs) is the obvious interpolation if the budget can stretch; it
-   has not been run. One seed; the seed-1 repeat is in progress.
+   the laptop by the M3 throughput, 180-260 ms on a Pi 4. With two seeds
+   it is at least the equal of `wide` as the accuracy reference at under
+   half the cost. A 48-channel stack at 360x240 (about 140 M MACs) is the
+   obvious interpolation if the budget can stretch; it has not been run. A
+   third seed would tighten the +-3.6.
 
 ### 6.5 Seed repeats under the full protocol
 
@@ -599,9 +606,9 @@ Per-class pooled AP, mean (s.d.) over the three seeds, float:
 - GPU training is not bit-reproducible: the run-to-run spread is about 4
   mAP points on a single split (Section 5) and 1-2 points on the pooled
   5-fold estimate (Section 6.5). `small` and the 360x240 model have three
-  seeds under the full protocol; `wide`, `small_wide` (at both
-  resolutions) and 480x320 have one, so their pooled values carry about
-  +-2 points.
+  seeds under the full protocol; `small_wide` at 360x240 has two (s.d.
+  3.6); `wide`, `small_wide` at 240x160 and 480x320 have one, so their
+  pooled values carry about +-2 points.
 - No test-time augmentation or ensembling, by design: the C runtime executes
   exactly one forward pass.
 - The Wall class is evaluated like the others although its boxes are large and
