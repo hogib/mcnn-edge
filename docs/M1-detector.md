@@ -445,21 +445,49 @@ Per-fold test mAP (fold 0 to 4; best epoch 102, 145, 72, 101, 61): float
    scenes. The consistent sign over five folds is therefore unexplained
    but its magnitude is at the level of score-ordering noise, and the int8
    model remains 4.0 pooled points above `small`.
-4. **Deployment.** At 78 M MACs the 360x240 model is within the plan's ~100 M
+4. **Resolution saturates at 360x240.** The same network at full resolution
+   (480x320, 139 M MACs, `runs/small_480_cv`) pools 54.1 float / 53.9 int8,
+   per fold 64.9, 65.8, 57.6, 47.0, 72.7 (best epochs 104, 129, 129, 62, 98):
+   no better than 360x240 (-0.5 pooled; per fold +0.9, -0.7, +5.3, 0.0,
+   +5.0, i.e. gains on the two folds where 360x240 was weakest and nothing
+   elsewhere) and 1.1 pooled points below `wide`, which it beats on two
+   folds. The resolution curve of the `small` network is therefore 49.4 ->
+   54.6 -> 54.1 pooled mAP for 35 -> 78 -> 139 M MACs, and the last point
+   of `wide` (55.2) is what its doubled channels buy at full resolution.
+   Per class, full resolution helps drink-carton (80.6, equal to `wide`) and
+   tire (93.5) and loses chain (35.4) and valve (21.4) relative to 360x240,
+   which is consistent with the 360x240 result being near the top of the
+   curve rather than on its rising part.
+5. **Seed repeat.** A second seed of the 360x240 model
+   (`runs/small_360_s1_cv`, seed 1) pools 52.2 float / 52.8 int8, per fold
+   61.0, 66.2, 49.2, 46.7, 67.5 (best epochs 79, 122, 98, 124, 108): 2.4
+   pooled points below seed 0, with per-fold differences of -3.0, -0.3,
+   -3.1, -0.3, -0.2. Two seeds give a pooled standard deviation of about
+   1.7 points, consistent with the 3.8-point single-split repeat of Section
+   5 divided by the five-fold pooling. Against `small` (one seed) the
+   360x240 gain is +5.2 and +2.8 for the two seeds, mean +4.0, and seed 1
+   is above `small` on four folds and 0.7 below on fold 2. The
+   recommendation of item 6 stands with that margin. The seed repeat also
+   closes item 3: the int8 difference of seed 1 is +0.6 pooled, positive on
+   three folds, so the consistent negative sign of seed 0 was chance.
+6. **Deployment.** At 78 M MACs the 360x240 model is within the plan's ~100 M
    MAC budget; the C runtime takes the input geometry from the exported
    header, so the only change for deployment is to regenerate `weights.h`
    from a 360x240 run. The expected cost is about 22 ms per frame on the
    laptop (2.25x the 9.9 ms of M4) and 80-110 ms on a Pi 4 by the M3
    estimate. The choice between the two is a latency decision: `small`
    stays the shipped configuration in this document, with the 360x240 model
-   as the recommended alternative where the budget allows.
+   as the recommended alternative where the budget allows. Going to full
+   resolution instead (139 M MACs, 2x the cost again) buys nothing (item 4).
 
 ## 7. Limitations
 
-- One seed per configuration, and GPU training is not bit-reproducible: the
-  measured run-to-run spread is about 4 mAP points on the development split
-  (Section 5). The 5-fold protocol with pooled AP (Section 6) is the final
-  evaluation; even there each fold is a single run.
+- One seed per configuration except the 360x240 model (two seeds, Section
+  6.4, item 5), and GPU training is not bit-reproducible: the measured
+  run-to-run spread is about 4 mAP points on the development split
+  (Section 5) and about 2 points on the pooled 5-fold estimate. The 5-fold
+  protocol with pooled AP (Section 6) is the final evaluation; each fold is
+  a single run.
 - No test-time augmentation or ensembling, by design: the C runtime executes
   exactly one forward pass.
 - The Wall class is evaluated like the others although its boxes are large and

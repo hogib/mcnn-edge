@@ -18,7 +18,7 @@
 \begin{center}
   {\LARGE Sonar debris detector: data split, model and runtime}\\[0.6em]
   {\large Project report, \texttt{sonar\_edge}}\\[0.3em]
-  3 November 2026
+  4 November 2026
 \end{center}
 \vspace{0.5em}
 
@@ -29,7 +29,7 @@ date above. It documents (i) how the sonar frames are split into scene folds
 and why, with worked examples; (ii) the detector architecture, its training
 and the configurations evaluated; (iii) the 8-bit quantisation and the C
 runtime that executes it; and (iv) the results obtained to date, including
-the two resolution/width ablations run on 3 November. The per-milestone
+the resolution and width ablations run on 3--4 November. The per-milestone
 notes \texttt{docs/M0}--\texttt{M4} in the repository contain the complete
 derivations; this report is the consolidated account.
 
@@ -445,36 +445,39 @@ per-class average precision. All runs: 150 epochs, strong augmentation, seed
     \midrule
     \cfg{small} (deployed) & 35 M & 49.4 & 49.7 & 56.4 (8.9) & 60.3, 59.3, 49.9, 44.9, 67.4 \\
     \cfg{small}, $360{\times}240$ & 78 M & 54.6 & 53.7 & 59.5 (9.3) & 64.0, 66.5, 52.3, 47.0, 67.7 \\
+    \cfg{small}, $360{\times}240$, seed 1 & 78 M & 52.2 & 52.8 & 58.1 (9.6) & 61.0, 66.2, 49.2, 46.7, 67.5 \\
+    \cfg{small}, $480{\times}320$ & 139 M & 54.1 & 53.9 & 61.6 (9.8) & 64.9, 65.8, 57.6, 47.0, 72.7 \\
     \cfg{small\_wide} & 90 M & 50.2 & 49.6 & 58.0 (11.9) & 60.1, 63.3, 51.1, 42.2, 73.4 \\
     \cfg{wide} & 450 M & 55.2 & 56.2 & 62.8 (8.3) & 66.9, 68.6, 55.7, 52.1, 70.5 \\
     \bottomrule
   \end{tabular}
   \caption{Five-fold cross-validation (mAP@0.5 in \%, pooled over all 1\,868
-  frames).}
+  frames). Seed 0 unless stated.}
   \label{tab:cv}
 \end{table}
 
 \begin{table}[h]
   \centering
   \small
-  \setlength{\tabcolsep}{4pt}
-  \begin{tabular}{lrrrrrr}
+  \setlength{\tabcolsep}{3pt}
+  \footnotesize
+  \begin{tabular}{lrrrrrrr}
     \toprule
-    Class (boxes) & \cfg{small} & \cfg{small}, int8 & \cfg{small} $360{\times}240$ & \cfg{small\_wide} & \cfg{wide} & \cfg{wide}, int8 \\
+    Class (boxes) & \cfg{small} & \cfg{small}, int8 & \cfg{small} $360{\times}240$ & \cfg{small} $480{\times}320$ & \cfg{small\_wide} & \cfg{wide} & \cfg{wide}, int8 \\
     \midrule
-    Bottle (468) & 78.0 & 77.4 & 84.2 & 55.9 & 84.7 & 82.7 \\
-    Can (292) & 9.1 & 9.6 & 16.1 & 8.3 & 18.8 & 20.5 \\
-    Chain (320) & 32.5 & 32.3 & 41.4 & 38.3 & 29.8 & 30.2 \\
-    Drink-carton (347) & 62.4 & 64.1 & 69.8 & 69.2 & 81.4 & 79.8 \\
-    Hook (171) & 90.8 & 91.4 & 93.6 & 95.0 & 95.5 & 94.9 \\
-    Propeller (197) & 51.2 & 50.9 & 49.1 & 47.6 & 46.7 & 46.9 \\
-    Shampoo-bottle (111) & 27.7 & 25.5 & 37.6 & 42.0 & 30.5 & 31.4 \\
-    Standing-bottle (65) & 1.2 & 2.5 & 3.7 & 2.0 & 24.1 & 26.7 \\
-    Tire (615) & 86.8 & 86.8 & 84.4 & 84.0 & 93.9 & 92.7 \\
-    Valve (240) & 22.8 & 23.2 & 38.6 & 28.8 & 17.5 & 27.5 \\
-    Wall (1056) & 81.3 & 83.4 & 82.6 & 81.0 & 84.8 & 84.9 \\
+    Bottle (468) & 78.0 & 77.4 & 84.2 & 83.2 & 55.9 & 84.7 & 82.7 \\
+    Can (292) & 9.1 & 9.6 & 16.1 & 14.6 & 8.3 & 18.8 & 20.5 \\
+    Chain (320) & 32.5 & 32.3 & 41.4 & 35.4 & 38.3 & 29.8 & 30.2 \\
+    Drink-carton (347) & 62.4 & 64.1 & 69.8 & 80.6 & 69.2 & 81.4 & 79.8 \\
+    Hook (171) & 90.8 & 91.4 & 93.6 & 91.9 & 95.0 & 95.5 & 94.9 \\
+    Propeller (197) & 51.2 & 50.9 & 49.1 & 53.9 & 47.6 & 46.7 & 46.9 \\
+    Shampoo-bottle (111) & 27.7 & 25.5 & 37.6 & 35.8 & 42.0 & 30.5 & 31.4 \\
+    Standing-bottle (65) & 1.2 & 2.5 & 3.7 & 3.6 & 2.0 & 24.1 & 26.7 \\
+    Tire (615) & 86.8 & 86.8 & 84.4 & 93.5 & 84.0 & 93.9 & 92.7 \\
+    Valve (240) & 22.8 & 23.2 & 38.6 & 21.4 & 28.8 & 17.5 & 27.5 \\
+    Wall (1056) & 81.3 & 83.4 & 82.6 & 81.4 & 81.0 & 84.8 & 84.9 \\
     \midrule
-    mAP, pooled & 49.4 & 49.7 & 54.6 & 50.2 & 55.2 & 56.2 \\
+    mAP, pooled & 49.4 & 49.7 & 54.6 & 54.1 & 50.2 & 55.2 & 56.2 \\
     \bottomrule
   \end{tabular}
   \caption{Pooled per-class average precision (\%) under five-fold
@@ -489,9 +492,13 @@ the development-split values of the same configurations. The fold ranking
 is the same for every configuration (folds 0, 1 and 4 easier, folds 2 and 3
 harder), so the per-fold spread is a property of the data, and the
 development fold is one of the easier ones. The per-fold standard deviation
-of 8--12 points is therefore not a measure of model uncertainty; the
-seed-identical repeat on one split (3.8 points) is the relevant noise figure
-when comparing configurations.
+of 8--12 points is therefore not a measure of model uncertainty. The relevant
+noise figures are the seed-identical repeat on one split (3.8 points) and the
+seed repeat of the $360 \times 240$ model under the full protocol: 52.2
+against 54.6 pooled, per-fold differences of $-3.0$, $-0.3$, $-3.1$, $-0.3$,
+$-0.2$, i.e.\ a pooled standard deviation of about 2 points. Against the
+deployed model the $360 \times 240$ gain is $+5.2$ and $+2.8$ for the two
+seeds, mean $+4.0$.
 
 \paragraph{Resolution versus width.} \cfg{wide} is 5.8 pooled points above
 \cfg{small} and is above it on every fold, by 3.1 to 9.3 points, which is
@@ -509,7 +516,13 @@ is therefore due to input resolution, and 90\% of it is available at a sixth
 of its cost, inside the budget of about 100~M MACs set for the target
 device. The gains occur in the same classes (bottle, can, drink-carton) and
 in addition in chain, shampoo-bottle and valve; standing-bottle, the class
-with the smallest median extent, improves only at full resolution.
+with the smallest median extent, improves only with \cfg{wide}. The same
+network at full resolution ($480 \times 320$, 139~M MACs) pools 54.1, no
+better than $360 \times 240$ ($-0.5$; per-fold $+0.9$, $-0.7$, $+5.3$, $0.0$,
+$+5.0$) and 1.1 below \cfg{wide}, so the resolution curve of the \cfg{small}
+network is 49.4, 54.6, 54.1 for 35, 78, 139~M MACs: it saturates at
+$360 \times 240$, and the last point of \cfg{wide} is what its doubled channel
+width buys at full resolution.
 
 \paragraph{Quantisation.} Post-training 8-bit quantisation is neutral for
 \cfg{small} and \cfg{wide} (pooled $+0.3$ and $+1.0$). For \cfg{small\_wide}
@@ -522,10 +535,12 @@ float model's peaks with a bias of $-0.01$, for \cfg{small}, \cfg{small\_wide}
 and the $360 \times 240$ model alike. The per-class differences are dominated
 by shampoo-bottle, which under int8 moves by up to 30 AP points on single
 folds for every configuration, including the two for which the pooled
-effect is positive; its 111 boxes lie in few scenes. The consistent sign
-over five folds is therefore unexplained, but its magnitude is at the level
-of score-ordering noise, and the quantised $360 \times 240$ model is still
-4.0 pooled points above the deployed one.
+effect is positive; its 111 boxes lie in few scenes. The seed repeat of the
+$360 \times 240$ model has a quantisation difference of $+0.6$ pooled,
+positive on three folds, so the consistent negative sign of the first seed
+was chance; quantisation is neutral within noise for all configurations,
+and the quantised $360 \times 240$ models are 3.1--4.0 pooled points above the
+deployed one.
 
 \paragraph{Pooled per-class values.} Pooled AP depends on the score
 calibration of the individual fold models, since detections from all five
@@ -546,18 +561,20 @@ reported next to the pooled ones.
   laptop core. The C runtime is bit-exact with the Python int8 reference and
   scores identically on the test fold.
   \item Input resolution, not channel width, is what the larger reference
-  model gains from. \cfg{small} at $360 \times 240$ gives 54.6\% (53.7\%
-  quantised) at 78~M MACs and is the recommended replacement if the latency
+  model gains from, and the gain saturates at $360 \times 240$ for this
+  network. \cfg{small} at $360 \times 240$ gives 54.6\% and 52.2\% for two
+  seeds (53.7\% and 52.8\% quantised) at 78~M MACs, about 4 points above the
+  deployed model, and is the recommended replacement if the latency
   measured on the target device allows it; deployment needs only a
   regenerated weight header, since the runtime takes its geometry from that
   header. Expected cost: about 22~ms per frame on the laptop, 80--110~ms on
   a Pi 4.
-  \item Open: seed repeats under the full cross-validation protocol (a
-  second seed of the $360 \times 240$ model and the same network at
-  $480 \times 320$ were running at the time of writing);
+  \item Open: seed repeats of the remaining configurations under the full
+  cross-validation protocol;
   the latency and energy measurement on the Raspberry Pi (M5), for which
   the runtime cross-compiles with \texttt{make CC=aarch64-linux-gnu-gcc}.
-  \item Known limits of the evaluation: each fold is a single run;
+  \item Known limits of the evaluation: each fold is a single run and
+  only one configuration has a second seed;
   standing-bottle is evaluable only under one fold assignment with four
   training instances; Wall is scored like the other classes although its
   boxes are large and loosely defined; the scene rule errs toward too few
