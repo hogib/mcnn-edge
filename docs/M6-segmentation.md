@@ -178,6 +178,28 @@ differences to the box-only means +2.5, 0.0, -0.8, -0.9, -4.2). Best
 epochs: Dice 1 seed 1: 99, 77, 129, 103, 99; Dice 0.3: 62, 126, 120, 81,
 123. The int8 masks equal the float masks in every run.
 
+### 3.5 Wider backbone (`small_wide` at 360x240, `runs/small_wide_360_segdice_cv`)
+
+To test whether the trade-off of Section 3.4 is a capacity effect, the
+Dice-1 setting was run on the 64-channel `small_wide` stack at 360x240
+(207.6 M MACs, 138 k parameters), together with the same backbone box-only
+(`runs/small_wide_360_cv`, 203.5 M MACs; M1 §6.6) as its reference. Seed 0.
+
+| Backbone at 360x240 | Box-only mAP (int8) | + stride-4 head + Dice 1: mAP (int8) | Box cost | mIoU (int8) | objects | mIoU per fold |
+|---|---|---|---|---|---|---|
+| small, 32 ch (3.3-3.4) | 52.6 +- 1.9 (52.3) | 50.3 +- 0.7 (49.7) | -2.3 | 42.0 +- 1.1 | 36.9 | 40.0, 49.0, 39.0, 31.0, 40.4 (seed 0) |
+| small_wide, 64 ch | 59.0 (58.8) | 56.3 (56.3) | -2.7 | **46.2** (46.0) | **41.5** | 46.4, 51.5, 40.1, 36.0, 44.5 |
+
+Box-only per fold 70.4, 72.2, 59.2, 55.5, 71.3; with the head 62.7, 71.0,
+52.5, 56.0, 70.3 (best epochs 77, 80, 51, 81, 41). Per-class IoU: bottle
+50.2, can 37.5, chain 38.8, drink-carton 46.6, hook 41.5, propeller 36.0,
+shampoo-bottle 42.2, standing-bottle 25.3, tire 62.9, valve 5.6, wall 69.7.
+
+The wider backbone raises the masks by 4.2 pooled mIoU (every fold, +1.7
+to +6.4) and the boxes by 6.4, but it does not remove the trade-off: adding
+the Dice head costs it 2.7 box mAP, the same as for the small backbone
+(-2.3). Width improves both outputs; it does not decouple them.
+
 ## 4. Discussion
 
 1. **The boxes are unaffected.** Pooled 52.1 against 52.6 +- 1.9 for the
@@ -206,8 +228,12 @@ epochs: Dice 1 seed 1: 99, 77, 129, 103, 99; Dice 0.3: 62, 126, 120, 81,
    stride-4 head (80.5 M MACs, mIoU 38.9, box mAP 51.1) is the setting to
    ship; for masks alone, Dice 1 (42.0). The shipped `weights.h` remains
    the box-only model, since the application has so far asked for boxes.
-   A wider backbone, which might remove the trade-off rather than balance
-   it, has not been run.
+   A 2.6x wider backbone (Section 3.5) lifts both outputs but leaves the
+   same -2.7 box cost, so the trade-off is a property of sharing one
+   feature map between a sparse and a dense objective at this depth, not
+   of width; the levers left are a Dice weight between 0.3 and 1, or a
+   second feature branch for the masks (one extra 3x3 layer on the
+   stride-8 features), neither run.
 3. **Few-scene classes fail as they do for boxes.** Standing-bottle (3.2)
    and valve (5.4) are the classes concentrated in one scene (M0 §3.3);
    the segmentation head cannot learn them from the other folds either.
@@ -234,6 +260,6 @@ epochs: Dice 1 seed 1: 99, 77, 129, 103, 99; Dice 0.3: 62, 126, 120, 81,
 - The stride-4 result is one seed; its +1.1 is below the ~2-point pooled seed
   noise of M1 §6.5, although the sign is consistent over four folds. The
   Dice-1 result has two seeds (masks 42.0 +- 1.1, boxes 50.3 +- 0.7); the
-  Dice-0.3 result has one.
+  Dice-0.3 result has one, as does the wide-backbone run of Section 3.5.
 - The per-cell target is the centre pixel's label; objects thinner than a
   cell can be missed by the target itself (part of the 77-point ceiling).
