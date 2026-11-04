@@ -29,7 +29,8 @@ date above. It documents (i) how the sonar frames are split into scene folds
 and why, with worked examples; (ii) the detector architecture, its training
 and the configurations evaluated; (iii) the 8-bit quantisation and the C
 runtime that executes it; and (iv) the results obtained to date, including
-the resolution and width ablations run on 3--4 November. The per-milestone
+the resolution and width ablations, the seed repeats and the segmentation
+head added on 3--4 November. The per-milestone
 notes \texttt{docs/M0}--\texttt{M4} in the repository contain the complete
 derivations; this report is the consolidated account.
 
@@ -55,8 +56,8 @@ from these frames, used by the MCNN paper and by the predecessor study
 \texttt{sonar\_cnn}, which showed that the crop size alone predicts the class
 there) and a \texttt{turntable-cropped} set of objects on a rotating table;
 neither is used here. Pixel-level semantic labels (values 0--11, background
-plus the eleven classes, LabelMe) exist for every frame and were fetched on
-4 November for a possible segmentation extension (Section~\ref{sec:next}).
+plus the eleven classes, LabelMe) exist for every frame and are used by the segmentation head of
+Section~\ref{sec:segres}.
 
 The frames come from a small number of recordings in which the sonar drifts
 slowly over a fixed arrangement of objects, so consecutive frames are
@@ -539,6 +540,59 @@ through all five folds with seeds 0, 1 and 2, everything else unchanged
   \label{tab:seeds}
 \end{table}
 
+\subsection{Segmentation head}
+\label{sec:segres}
+
+The dataset's pixel labels (Section~\ref{sec:data}) were used to add a
+second $1 \times 1$ head of $C + 1 = 12$ channels on the same stride-8
+features of the $360 \times 240$ model (+0.3~M MACs, +396 parameters). The
+target of a cell is the label at its centre; the masks follow the flip,
+shift and zoom augmentation. The head is trained with per-cell
+cross-entropy added to the box loss and evaluated as mean IoU at the
+working resolution after nearest upsampling, with the five test-fold
+confusion matrices summed before IoU is taken. Model selection remains on
+validation box mAP. Background covers 95.6\% of the pixels; with an
+unweighted cross-entropy the head predicted background for most object
+pixels (development split: mIoU 27.4, object recall 10--32\% at precision
+86--98\%), and a background class weight of 0.1 was used instead. The
+cell-centre labels themselves, upsampled the same way, give the ceiling of
+this representation: 77.2 mIoU on the development test fold.
+
+\begin{table}[h]
+  \centering
+  \small
+  \begin{tabular}{lccccc}
+    \toprule
+    Model, $360 \times 240$ & Box mAP, pooled & Box mAP per fold & mIoU, pooled & mIoU, objects & mIoU per fold \\
+    \midrule
+    boxes only, 3 seeds & 52.6 (1.9) & 61.0, 65.1, 52.2, 48.2, 67.5 & -- & -- & -- \\
+    + segmentation head & 52.1 & 61.7, 67.6, 48.2, 48.7, 66.3 & 33.9 & 28.2 & 34.0, 39.9, 29.8, 24.2, 35.1 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Five-fold cross-validation with the segmentation head (seed 0;
+  the box-only row gives seed means and per-fold means). mIoU over the 12
+  labels; ``objects'' over the 11 object classes.}
+  \label{tab:seg}
+\end{table}
+
+\begin{table}[h]
+  \centering
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{lrrrrrrrrrrrr}
+    \toprule
+    & Bkg & Bottle & Can & Chain & Drink-c. & Hook & Prop. & Shampoo & Stand. & Tire & Valve & Wall \\
+    \midrule
+    IoU & 96.9 & 32.7 & 27.0 & 32.2 & 27.6 & 22.7 & 23.7 & 24.6 & 3.2 & 46.1 & 5.4 & 64.5 \\
+    Recall & 97 & 72 & 65 & 61 & 64 & 49 & 47 & 71 & 6 & 75 & 10 & 91 \\
+    Precision & 99 & 37 & 32 & 41 & 33 & 30 & 33 & 27 & 7 & 55 & 11 & 69 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Pooled per-class segmentation IoU, pixel recall and pixel
+  precision (\%) under five-fold cross-validation.}
+  \label{tab:segclass}
+\end{table}
+
 \section{Discussion}
 
 \paragraph{Protocol.} Pooled cross-validation values are 10--15 points below
@@ -624,6 +678,20 @@ background; (iii)~an output stride of 4 instead of 8 for the small classes,
 at about twice the compute. None of these can create training instances of
 standing-bottle outside its scene; that class is reported as a limitation.
 
+\paragraph{Segmentation.} The boxes are unaffected by the second head:
+52.1 pooled against 52.6 $\pm$ 1.9 for the box-only model, with every
+per-class AP inside the seed spread. The masks reach 33.9 mIoU (28.2 over
+the object classes) against a ceiling of 77 for the stride-8 grid, so the
+limit is learning, not representation. Recall is 50--75\% for the common
+classes at precision 30--55\%: the head finds most object pixels and labels
+a halo of background around them, which costs a large fraction of the IoU of
+objects 4--10 cells wide. Standing-bottle and valve fail as they do for
+boxes, for the same one-scene reason. The levers not yet tried are a Dice or
+IoU term in place of the fixed background weight, a stride-4 output for this
+head (one upsampling layer), and more capacity. The C runtime already
+computes the 27-channel head map (the quantised model pools 52.2 box mAP)
+but does not yet emit the per-cell label.
+
 \paragraph{Pooled per-class values.} Pooled AP depends on the score
 calibration of the individual fold models, since detections from all five
 are ranked on one list. The bottle AP of \cfg{small\_wide} (55.9 against 78.0
@@ -651,13 +719,10 @@ deployed model and 80--110~ms for $360 \times 240$ on a Pi~4; these are
 estimates until measured. The hardware was not available at the time of
 writing.
 
-\paragraph{Segmentation.} The pixel labels make a multi-task extension
-possible at almost no runtime cost: a second $1 \times 1$ head of $C + 1$
-channels on the same stride-8 features, trained with per-cell cross-entropy
-against the downsampled mask, evaluated as mean IoU at full resolution after
-nearest upsampling, and executed in the runtime as one \texttt{argmax} per
-cell. Whether the shared features also improve the boxes is an empirical
-question for the same cross-validation protocol.
+\paragraph{Segmentation.} Section~\ref{sec:segres} gives the first
+result. The next steps are a stride-4 segmentation output, a Dice term in
+the loss, the per-cell \texttt{argmax} in the C decoder, and the mIoU of
+the quantised model.
 
 \section{Conclusions and open items}
 
@@ -678,8 +743,14 @@ question for the same cross-validation protocol.
   regenerated weight header, since the runtime takes its geometry from that
   header. Expected cost: about 22~ms per frame on the laptop, 80--110~ms on
   a Pi 4.
-  \item Open: seed repeats of \cfg{wide}, \cfg{small\_wide} and the
-  $480 \times 320$ run, which have one seed each (about $\pm 2$ points);
+  \item A segmentation head on the same features costs 0.3~M MACs, leaves
+  the boxes unchanged and reaches 33.9 pooled mIoU (28.2 over the object
+  classes) with a background-weighted cross-entropy, against a ceiling of
+  77 for the stride-8 grid; it is a working first version with clear
+  levers left.
+  \item Open: seed repeats of \cfg{wide}, \cfg{small\_wide}, the
+  $480 \times 320$ run and the segmentation model, which have one seed each
+  (about $\pm 2$ points);
   the latency and energy measurement on the Raspberry Pi (M5), for which
   the runtime cross-compiles with \texttt{make CC=aarch64-linux-gnu-gcc}.
   \item Known limits of the evaluation: three seeds for two

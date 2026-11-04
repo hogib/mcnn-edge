@@ -40,7 +40,7 @@ mAP reported in the final write-up is measured from the C binary, not PyTorch.
 
 Status (2026-11-03): M0-M4 done on the development split (docs/M0-M4); M1
 iteration done (strong augmentation +5 mAP; `small` shipped, `wide` the accuracy
-reference); 5-fold CV done (M1 §6): `small` 49.4 float / 49.7 int8 pooled mAP (shipped), `wide` 55.2 / 56.2 at 13x the compute, `small_wide` 50.2 / 49.6 at 2.6x (width alone does not help, M1 §6.3), `small` at 360x240 52.6 +- 1.9 over 3 seeds vs 48.1 +- 1.1 for `small` (M1 §6.5; resolution is the factor and saturates there, 480x320 gives 54.1 at 4x; 360x240 recommended if the Pi latency allows); segmentation head (M6, in progress); M5 needs the Pi.
+reference); 5-fold CV done (M1 §6): `small` 49.4 float / 49.7 int8 pooled mAP (shipped), `wide` 55.2 / 56.2 at 13x the compute, `small_wide` 50.2 / 49.6 at 2.6x (width alone does not help, M1 §6.3), `small` at 360x240 52.6 +- 1.9 over 3 seeds vs 48.1 +- 1.1 for `small` (M1 §6.5; resolution is the factor and saturates there, 480x320 gives 54.1 at 4x; 360x240 recommended if the Pi latency allows); segmentation head done (M6: +0.3 M MACs, pooled mIoU 33.9 / objects 28.2 with background weight 0.1, boxes unchanged at 52.1); M5 needs the Pi.
 
 | | Milestone | Done when |
 |---|---|---|

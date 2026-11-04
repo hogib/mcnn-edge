@@ -3,6 +3,12 @@
 Marine-debris detection on forward-looking sonar frames, trained in Python and
 deployed as a dependency-free C11 runtime on a Raspberry Pi. See `docs/PLAN.md`.
 
+## Segmentation
+
+The dataset's pixel labels (`Masks/`, fetch them into the sparse checkout) train an optional
+12-channel segmentation head on the same features: `sonar-edge train ... --seg --seg-bg-w 0.1`;
+mIoU is reported next to mAP and pooled by `sonar-edge cv`. See `docs/M6-segmentation.md`.
+
 ## Report
 
 `report/overview.tex` is a LaTeX overview of the data split (with worked
