@@ -36,8 +36,11 @@ def write_weights(model, in_h, in_w, out: Path):
     parts.append(f"#define SE_N_LAYERS {len(L)}")
     parts.append(f"#define SE_HEAD_COUT {model['head']['cout']}")
     parts.append(f"#define SE_HEAD_CIN {model['head']['cin']}")
-    seg = model["head"]["cout"] - model["n_classes"] - 4  # segmentation channels (background + classes), or 0
+    seg = model["head"]["cout"] - model["n_classes"] - 4  # segmentation channels (background + classes) * up^2, or 0
+    up = int(round((seg / (model["n_classes"] + 1)) ** 0.5)) if seg > 0 else 1
+    assert seg <= 0 or (model["n_classes"] + 1) * up * up == seg, "segmentation channels are not (C+1)*up^2"
     parts.append(f"#define SE_SEG_COUT {seg if seg > 0 else 0}")
+    parts.append(f"#define SE_SEG_UP {up}  /* label grid is SE_OUT_H*SE_SEG_UP x SE_OUT_W*SE_SEG_UP */")
     # per-layer geometry and the largest activation buffer (padded, HWC)
     h, w, max_elems, max_pad = in_h, in_w, 0, 0
     geom = []
@@ -99,6 +102,8 @@ def write_golden(npz, out: Path):
     parts.append(c_array("gold_frame_index", "int32_t", g["frame_index"]))
     if "seg" in g.files:  # per-cell argmax labels of the Python int8 model (models with a segmentation head)
         parts.append("#define GOLD_HAS_SEG 1")
+        parts.append(f"#define GOLD_SEG_H {g['seg'].shape[1]}")
+        parts.append(f"#define GOLD_SEG_W {g['seg'].shape[2]}")
         parts.append(c_array("gold_seg", "uint8_t", g["seg"].flatten(), 32))
     else:
         parts.append("#define GOLD_HAS_SEG 0")

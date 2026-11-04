@@ -50,6 +50,17 @@ def test_seg_iou():
     assert np.isclose(iou[0], 50 / 65) and np.isclose(iou[1], 20 / 35) and np.isnan(iou[2])
 
 
+def test_seg_up_target_and_shapes():
+    ds = _ds(scale=2, seg_up=2)
+    seg = ds[0]["seg"]
+    assert seg.shape == (60, 40)
+    m = Detector(n_classes=2, config="small", seg=True, seg_up=2)
+    out = m(torch.zeros(1, 1, 240, 160))
+    assert out.shape[1] == 2 + 4 + 3 * 4 and tuple(m.split_seg(out).shape) == (1, 3, 60, 40)
+    # wall rows 0..9 at working scale -> sub-cell rows with centres 2 and 6 -> label rows 0,1
+    assert (seg[:2] == 11).all() and (seg[2:] != 11).all()
+
+
 def test_seg_head_layout():
     m = Detector(n_classes=11, config="small", seg=True)
     out = m(torch.zeros(1, 1, 64, 64))

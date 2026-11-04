@@ -68,7 +68,7 @@ int main(int argc, char **argv)
                    dets[k].x0, dets[k].y0, dets[k].x1, dets[k].y1);
         if (segdir) {
             if (se_seg_classes() <= 0) { fprintf(stderr, "-s: the compiled-in model has no segmentation head\n"); return 1; }
-            const int oh = se_out_height(), ow = se_out_width();
+            const int oh = se_seg_height(), ow = se_seg_width();
             uint8_t *labels = malloc((size_t)oh * ow);
             se_segment_head(se_forward(frame), labels);
             const char *base = strrchr(argv[i], '/');

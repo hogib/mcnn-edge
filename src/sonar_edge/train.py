@@ -54,7 +54,8 @@ def seg_confusion(model, ds, device, bs=16):
     dl = DataLoader(ds, bs, shuffle=False, num_workers=0)
     for batch in dl:
         logits = model.split_seg(model(batch["image"].to(device)))
-        pred = logits.argmax(1).repeat_interleave(model.stride, 1).repeat_interleave(model.stride, 2)
+        up = model.stride // model.seg_up
+        pred = logits.argmax(1).repeat_interleave(up, 1).repeat_interleave(up, 2)
         for b, idx in enumerate(batch["index"].tolist()):
             gt = torch.from_numpy(ds.seg_mask(pos[idx]).astype(np.int64)).to(device)
             p = pred[b, : gt.shape[0], : gt.shape[1]]
@@ -72,15 +73,16 @@ def seg_iou(conf):
 def cmd_train(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(args.seed)
-    model = Detector(config=args.config, seg=args.seg).to(device)
-    ds, classes = dev_datasets(model.stride, args.scale, args.test_fold, args.val_fold, args.seed, args.aug, seg=args.seg)
+    model = Detector(config=args.config, seg=args.seg, seg_up=args.seg_up).to(device)
+    ds, classes = dev_datasets(model.stride, args.scale, args.test_fold, args.val_fold, args.seed, args.aug,
+                               seg=args.seg, seg_up=model.seg_up)
     if args.limit:
         for d in ds.values():
             d.frames = d.frames[: args.limit]
             d.images = d.images[: args.limit]
     out = ROOT / args.out
     out.mkdir(parents=True, exist_ok=True)
-    print(f"config {args.config} scale {args.scale}{' +seg' if args.seg else ''}: "
+    print(f"config {args.config} scale {args.scale}{f' +seg(up {model.seg_up})' if args.seg else ''}: "
           f"{sum(p.numel() for p in model.parameters()):,} params, "
           f"{macs(model, ds['train'].h, ds['train'].w) / 1e6:.1f}M MACs/frame, stride {model.stride}, "
           f"train/val/test {len(ds['train'])}/{len(ds['val'])}/{len(ds['test'])}, device {device}")
@@ -118,6 +120,7 @@ def cmd_train(args):
         if m > best:
             best = m
             torch.save({"model": model.state_dict(), "config": args.config, "scale": args.scale, "seg": args.seg,
+                        "seg_up": model.seg_up,
                         "classes": classes, "epoch": ep + 1, "val_map": m}, out / "best.pt")
             flag = " *"
         segtxt = f" seg {tot[3]:.3f} val mIoU {100 * miou:5.1f}" if args.seg else ""
@@ -157,15 +160,18 @@ def cmd_quantize(args):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     ck = torch.load(ROOT / args.checkpoint, map_location=device, weights_only=False)
-    model = Detector(config=ck["config"], seg=ck.get("seg", False)).to(device).eval()
+    model = Detector(config=ck["config"], seg=ck.get("seg", False), seg_up=ck.get("seg_up", 1)).to(device).eval()
     model.load_state_dict(ck["model"])
-    ds, classes = dev_datasets(model.stride, ck["scale"], args.test_fold, args.val_fold, seg=model.seg)
+    ds, classes = dev_datasets(model.stride, ck["scale"], args.test_fold, args.val_fold, seg=model.seg, seg_up=model.seg_up)
     out = (ROOT / args.checkpoint).parent
 
-    def seg_labels(acc):  # per-cell argmax of the int8 segmentation channels on their real values, [B, gh, gw] uint8
+    def seg_labels(acc):  # per-cell argmax of the int8 segmentation channels on their real values, [B, gh*r, gw*r] uint8
         c0 = model.n_classes + 4
         real = acc[:, c0:].to(torch.float64) * torch.from_numpy(q.head_scale[c0:]).to(acc.device)[None, :, None, None]
-        return real.to(torch.float32).argmax(1).to(torch.uint8)
+        real = real.to(torch.float32)
+        if model.seg_up > 1:
+            real = F.pixel_shuffle(real, model.seg_up)
+        return real.argmax(1).to(torch.uint8)
 
     def u8(d, idx):  # working-scale uint8 frames
         return np.stack([np.round(d._prep(d.images[i]) * 255).astype(np.uint8) for i in idx])
@@ -188,7 +194,8 @@ def cmd_quantize(args):
             for i, dets in zip(idx, decode(heat, size, off, model.stride, 32, -4.0)):
                 pred[d.frames[i].index] = dets
             if model.seg:
-                lab = seg_labels(acc).to(torch.int64).repeat_interleave(model.stride, 1).repeat_interleave(model.stride, 2)
+                up = model.stride // model.seg_up
+                lab = seg_labels(acc).to(torch.int64).repeat_interleave(up, 1).repeat_interleave(up, 2)
                 for b, i in enumerate(idx):
                     gt = torch.from_numpy(d.seg_mask(i).astype(np.int64)).to(device)
                     pcell = lab[b, : gt.shape[0], : gt.shape[1]]
@@ -236,9 +243,9 @@ def _cmd_cv(args):
 def cmd_eval(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     ck = torch.load(ROOT / args.checkpoint, map_location=device, weights_only=False)
-    model = Detector(config=ck["config"], seg=ck.get("seg", False)).to(device)
+    model = Detector(config=ck["config"], seg=ck.get("seg", False), seg_up=ck.get("seg_up", 1)).to(device)
     model.load_state_dict(ck["model"])
-    ds, classes = dev_datasets(model.stride, ck["scale"], args.test_fold, args.val_fold, seg=model.seg)
+    ds, classes = dev_datasets(model.stride, ck["scale"], args.test_fold, args.val_fold, seg=model.seg, seg_up=model.seg_up)
     report(model, ds, device, classes, (ROOT / args.checkpoint).parent, ck["epoch"])
 
 
@@ -268,6 +275,7 @@ def main():
     t.add_argument("--seg", action="store_true", help="add a per-cell semantic segmentation head (needs Masks/)")
     t.add_argument("--seg-w", type=float, default=1.0, help="weight of the segmentation cross-entropy")
     t.add_argument("--seg-bg-w", type=float, default=1.0, help="class weight of background in that cross-entropy")
+    t.add_argument("--seg-up", type=int, default=1, help="segmentation grid finer than the stride by this factor (pixel shuffle)")
     t.add_argument("--limit", type=int, default=0, help="use only N frames per split (smoke test)")
     t.add_argument("--out", default="runs/dev")
     folds(t)

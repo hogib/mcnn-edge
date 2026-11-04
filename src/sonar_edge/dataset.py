@@ -15,10 +15,11 @@ from .targets import make_targets
 
 
 class FrameDataset(Dataset):
-    def __init__(self, frames, classes, stride, scale=1, train=False, seed=0, max_objs=16, aug="basic", seg=False):
+    def __init__(self, frames, classes, stride, scale=1, train=False, seed=0, max_objs=16, aug="basic", seg=False,
+                 seg_up=1):
         self.frames = frames
         self.aug = aug
-        self.seg = seg
+        self.seg, self.seg_up = seg, seg_up
         self.cidx = {c: i for i, c in enumerate(classes)}
         self.n_classes = len(classes)
         self.stride, self.scale, self.train = stride, scale, train
@@ -77,9 +78,10 @@ class FrameDataset(Dataset):
         img = np.ascontiguousarray(img, np.float32)
         heat, ind, size, off, mask = make_targets(boxes, self.n_classes, self.gh, self.gw, self.stride, self.max_objs)
         item = {}
-        if seg is not None:  # per-cell label: the label at the cell centre
-            ys = np.arange(self.gh) * self.stride + self.stride // 2
-            xs = np.arange(self.gw) * self.stride + self.stride // 2
+        if seg is not None:  # per-cell label: the label at the cell centre (on the seg_up-times finer grid)
+            st = self.stride // self.seg_up
+            ys = np.arange(self.gh * self.seg_up) * st + st // 2
+            xs = np.arange(self.gw * self.seg_up) * st + st // 2
             item["seg"] = torch.from_numpy(np.ascontiguousarray(seg[ys][:, xs]).astype(np.int64))
         return item | {
             "image": torch.from_numpy(img)[None],
@@ -129,11 +131,11 @@ class FrameDataset(Dataset):
         }
 
 
-def dev_datasets(stride, scale=1, test_fold=0, val_fold=1, seed=0, aug="basic", seg=False):
+def dev_datasets(stride, scale=1, test_fold=0, val_fold=1, seed=0, aug="basic", seg=False, seg_up=1):
     frames = load_frames()
     classes = class_names(frames)
     split = load_split(test_fold, val_fold)
     parts = {k: [f for f in frames if split[f.index] == k] for k in ("train", "val", "test")}
-    ds = {k: FrameDataset(v, classes, stride, scale, train=(k == "train"), seed=seed, aug=aug, seg=seg)
+    ds = {k: FrameDataset(v, classes, stride, scale, train=(k == "train"), seed=seed, aug=aug, seg=seg, seg_up=seg_up)
           for k, v in parts.items()}
     return ds, classes

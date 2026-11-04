@@ -34,11 +34,14 @@ int main(void)
         failed |= mism != 0;
 #if GOLD_HAS_SEG
         {
-            static uint8_t labels[GOLD_HEAD_H * GOLD_HEAD_W];
+            static uint8_t labels[GOLD_SEG_H * GOLD_SEG_W];
+            const long nc = (long)GOLD_SEG_H * GOLD_SEG_W;
             long segmism = 0;
-            if (se_segment_head(hm, labels) != oh * ow) { printf("FAIL: se_segment_head\n"); failed = 1; }
-            for (long i = 0; i < (long)oh * ow; i++) segmism += labels[i] != gold_seg[(size_t)g * oh * ow + i];
-            printf("   segmentation labels: %s (%ld of %d cells differ)\n", segmism ? "FAIL" : "ok", segmism, oh * ow);
+            if (se_seg_height() != GOLD_SEG_H || se_seg_width() != GOLD_SEG_W || se_segment_head(hm, labels) != nc) {
+                printf("FAIL: se_segment_head geometry\n"); failed = 1;
+            }
+            for (long i = 0; i < nc; i++) segmism += labels[i] != gold_seg[(size_t)g * nc + i];
+            printf("   segmentation labels: %s (%ld of %ld cells differ)\n", segmism ? "FAIL" : "ok", segmism, nc);
             failed |= segmism != 0;
         }
 #endif

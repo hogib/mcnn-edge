@@ -7,7 +7,8 @@ Output stride 8: a 480x320 frame gives a 60x40 grid. Heads per cell:
   [0:C]      class heatmap logits (C = n_classes)
   [C:C+2]    box size (w, h) in units of stride
   [C+2:C+4]  centre offset (dx, dy) within the cell, in [0, 1)
-  [C+4:2C+5] optional semantic-segmentation logits per cell (background + C classes), seg=True
+  [C+4:]     optional semantic-segmentation logits (background + C classes), seg=True; with
+             seg_up = r they are (C+1) r^2 channels, pixel-shuffled to an r-times finer label grid
 """
 
 import torch
@@ -36,18 +37,19 @@ class ConvBNReLU(nn.Sequential):
 
 
 class Detector(nn.Module):
-    def __init__(self, n_classes=11, config="base", seg=False):
+    def __init__(self, n_classes=11, config="base", seg=False, seg_up=1):
         super().__init__()
         self.n_classes = n_classes
         self.config = config
         self.seg = seg
+        self.seg_up = seg_up if seg else 1
         layers, cin = [], 1
         self.stride = 1
         for cout, s, d in CONFIGS[config]:
             layers.append(ConvBNReLU(cin, cout, s, d))
             cin, self.stride = cout, self.stride * s
         self.backbone = nn.Sequential(*layers)
-        self.head = nn.Conv2d(cin, n_classes + 4 + (n_classes + 1 if seg else 0), 1)
+        self.head = nn.Conv2d(cin, n_classes + 4 + ((n_classes + 1) * self.seg_up**2 if seg else 0), 1)
         # CenterNet init: heatmap bias so initial p ~ 0.01, keeps focal loss stable
         nn.init.zeros_(self.head.weight)
         with torch.no_grad():
@@ -62,9 +64,10 @@ class Detector(nn.Module):
         return out[:, :C], out[:, C : C + 2], out[:, C + 2 : C + 4]
 
     def split_seg(self, out):
-        """[B, C+1, gh, gw] segmentation logits (channel 0 = background)."""
+        """[B, C+1, gh*r, gw*r] segmentation logits (channel 0 = background), r = seg_up."""
         assert self.seg
-        return out[:, self.n_classes + 4 :]
+        s = out[:, self.n_classes + 4 :]
+        return torch.nn.functional.pixel_shuffle(s, self.seg_up) if self.seg_up > 1 else s
 
 
 def macs(model: Detector, h=480, w=320) -> int:

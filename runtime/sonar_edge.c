@@ -24,7 +24,10 @@ int se_num_classes(void) { return SE_N_CLASSES; }
 int se_out_height(void) { return SE_OUT_H; }
 int se_out_width(void) { return SE_OUT_W; }
 int se_head_channels(void) { return SE_HEAD_COUT; }
-int se_seg_classes(void) { return SE_SEG_COUT; }
+int se_seg_classes(void) { return SE_SEG_COUT > 0 ? SE_N_CLASSES + 1 : 0; }
+int se_seg_up(void) { return SE_SEG_UP; }
+int se_seg_height(void) { return SE_OUT_H * SE_SEG_UP; }
+int se_seg_width(void) { return SE_OUT_W * SE_SEG_UP; }
 
 /* (acc * M) >> shift, rounding half away from zero, clamped to uint8.
  * Identical to sonar_edge.quant.round_shift. */
@@ -121,23 +124,32 @@ static inline int32_t head_at(const int32_t *hm, int y, int x, int c)
 
 /* Per-cell argmax over the segmentation channels, on the real values
  * float32(float64(acc) * scale_c) like the Python reference (torch.argmax:
- * first index on ties, hence the strict comparison). */
+ * first index on ties, hence the strict comparison). With SE_SEG_UP = r the
+ * channels are laid out as torch.pixel_shuffle expects, channel
+ * c*r*r + sy*r + sx for label c of sub-cell (sy, sx), and the label grid is
+ * r times finer than the output grid. */
 int se_segment_head(const int32_t *hm, uint8_t *labels)
 {
 #if SE_SEG_COUT > 0
-    const int c0 = SE_N_CLASSES + 4;
+    const int c0 = SE_N_CLASSES + 4, r = SE_SEG_UP, nl = SE_N_CLASSES + 1, lw = SE_OUT_W * r;
     for (int y = 0; y < SE_OUT_H; y++) {
         for (int x = 0; x < SE_OUT_W; x++) {
-            int best = 0;
-            float bv = head_real(head_at(hm, y, x, c0), c0);
-            for (int c = 1; c < SE_SEG_COUT; c++) {
-                const float v = head_real(head_at(hm, y, x, c0 + c), c0 + c);
-                if (v > bv) { bv = v; best = c; }
+            for (int sy = 0; sy < r; sy++) {
+                for (int sx = 0; sx < r; sx++) {
+                    const int sub = sy * r + sx;
+                    int best = 0;
+                    float bv = head_real(head_at(hm, y, x, c0 + sub), c0 + sub);
+                    for (int c = 1; c < nl; c++) {
+                        const int ch = c0 + c * r * r + sub;
+                        const float v = head_real(head_at(hm, y, x, ch), ch);
+                        if (v > bv) { bv = v; best = c; }
+                    }
+                    labels[(size_t)(y * r + sy) * lw + (x * r + sx)] = (uint8_t)best;
+                }
             }
-            labels[(size_t)y * SE_OUT_W + x] = (uint8_t)best;
         }
     }
-    return SE_OUT_H * SE_OUT_W;
+    return SE_OUT_H * SE_OUT_W * r * r;
 #else
     (void)hm; (void)labels;
     return -1;
