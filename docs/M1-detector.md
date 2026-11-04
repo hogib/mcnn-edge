@@ -349,7 +349,8 @@ fold by fold: -0.2, +4.0, +1.2, -2.7, +6.0; against `wide`: -6.8, -5.3,
 
 **Discussion.**
 
-1. **Width without resolution does not help.** `small_wide` is 0.8 pooled
+1. **Width without resolution does not help** (but see Section 6.6 for
+   width *with* resolution). `small_wide` is 0.8 pooled
    points above `small` in float and 0.1 below in int8; it wins three folds
    and loses two, all five differences inside the ~4-point run-to-run noise
    of Section 5. `wide` beats it on four folds of five by 5 to 10 points.
@@ -452,8 +453,10 @@ Per-fold test mAP (fold 0 to 4; best epoch 102, 145, 72, 101, 61): float
    +5.0, i.e. gains on the two folds where 360x240 was weakest and nothing
    elsewhere) and 1.1 pooled points below `wide`, which it beats on two
    folds. The resolution curve of the `small` network is therefore 49.4 ->
-   54.6 -> 54.1 pooled mAP for 35 -> 78 -> 139 M MACs, and the last point
-   of `wide` (55.2) is what its doubled channels buy at full resolution.
+   54.6 -> 54.1 pooled mAP for 35 -> 78 -> 139 M MACs. (The next sentence
+   of the original text, that the last point of `wide` is what its doubled
+   channels buy at full resolution, is superseded by Section 6.6: at
+   360x240 the same channels buy +6.4.)
    Per class, full resolution helps drink-carton (80.6, equal to `wide`) and
    tire (93.5) and loses chain (35.4) and valve (21.4) relative to 360x240,
    which is consistent with the 360x240 result being near the top of the
@@ -482,6 +485,53 @@ Per-fold test mAP (fold 0 to 4; best epoch 102, 145, 72, 101, 61): float
    20.1 ms per frame (M3). The 240x160 model remains available as
    `runs/small_e150_aug` and is the fallback if the Pi latency of the
    360x240 model turns out too high.
+
+### 6.6 Width at 360x240: the interaction
+
+Section 6.3 found that doubling the channel width at 240x160 is worth
+nothing, Section 6.4 that raising the resolution to 360x240 is worth +4.5.
+The two factors were not tested together. `small_wide` at 360x240
+(`runs/small_wide_360_cv`, 203.5 M MACs, 135 k parameters; same protocol,
+seed 0) closes that gap:
+
+| Configuration | MACs | Pooled float | Pooled int8 | Per fold (float) |
+|---|---|---|---|---|
+| small, 240x160 (3 seeds) | 35 M | 48.1 +- 1.1 | 48.1 | 55.5, 58.5, 48.9, 42.5, 67.4 (means) |
+| small_wide, 240x160 | 90 M | 50.2 | 49.6 | 60.1, 63.3, 51.1, 42.2, 73.4 |
+| small, 360x240 (3 seeds, shipped) | 78 M | 52.6 +- 1.9 | 52.3 | 61.0, 65.1, 52.2, 48.2, 67.5 (means) |
+| **small_wide, 360x240** | 204 M | **59.0** | **58.8** | 70.4, 72.2, 59.2, 55.5, 71.3 |
+| wide, 480x320 | 450 M | 55.2 | 56.2 | 66.9, 68.6, 55.7, 52.1, 70.5 |
+
+Best epochs 72, 114, 113, 77, 63. Per class (pooled float): bottle 86.6,
+can 19.6, chain 34.1, drink-carton 85.6, hook 95.3, propeller 50.8,
+shampoo-bottle 36.6, standing-bottle 39.6, tire 91.9, valve 25.4, wall 83.2.
+
+**Discussion.**
+
+1. **Width and resolution interact.** At 240x160 the extra channels buy
+   +0.8 (noise); at 360x240 the same extra channels buy +6.4 over the
+   three-seed mean of `small`, and the run is above every `small` fold mean
+   by 3.8 to 9.4 points and above every one of the nine `small` seed
+   values. The conclusion of Section 6.3 holds as stated, width *without*
+   resolution does not help, but its generalisation in Section 6.4, item 4,
+   that the last point of `wide` "is what its doubled channels buy at full
+   resolution", was wrong: the channels are worth more at 360x240 than at
+   480x320, and `small_wide` at 360x240 is 3.8 pooled points above `wide`
+   at 480x320 on every fold (by 0.8 to 3.5) at 45% of its compute. The
+   reading is that the 32-channel stack is the bottleneck once the input
+   carries the small objects, and that at 480x320 the 60x40 grid with a
+   254 px receptive field is no longer the best use of the same channels.
+2. **The gains are where the small classes are.** Standing-bottle reaches
+   39.6 (from 6.4 +- 2.9 for `small` at 360x240 and 24.1 for `wide`),
+   drink-carton 85.6 (from 63.1), can 19.6 (from 15.3), shampoo-bottle 36.6
+   (from 33.3), tire 91.9 (from 89.3); chain (34.1 from 39.6) and valve
+   (25.4 from 26.5) are flat within their seed spread.
+3. **It is not a deployment candidate as it stands.** 204 M MACs is 2.6x
+   the shipped model and twice the plan's budget: about 52 ms per frame on
+   the laptop by the M3 throughput, 180-260 ms on a Pi 4. It replaces
+   `wide` as the accuracy reference. A 48-channel stack at 360x240 (about
+   140 M MACs) is the obvious interpolation if the budget can stretch; it
+   has not been run. One seed; the seed-1 repeat is in progress.
 
 ### 6.5 Seed repeats under the full protocol
 
@@ -549,8 +599,9 @@ Per-class pooled AP, mean (s.d.) over the three seeds, float:
 - GPU training is not bit-reproducible: the run-to-run spread is about 4
   mAP points on a single split (Section 5) and 1-2 points on the pooled
   5-fold estimate (Section 6.5). `small` and the 360x240 model have three
-  seeds under the full protocol; `wide`, `small_wide` and 480x320 have one,
-  so their pooled values carry about +-2 points.
+  seeds under the full protocol; `wide`, `small_wide` (at both
+  resolutions) and 480x320 have one, so their pooled values carry about
+  +-2 points.
 - No test-time augmentation or ensembling, by design: the C runtime executes
   exactly one forward pass.
 - The Wall class is evaluated like the others although its boxes are large and
