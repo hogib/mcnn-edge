@@ -100,6 +100,28 @@ quantised head, `sonar-edge quantize` after this milestone) pool to 33.8
 mIoU against 33.9 float, per fold within 0.2, and every per-class IoU within
 0.3: quantisation is free for the masks as for the boxes.
 
+### 3.3 Sub-pixel head: a stride-4 label grid (`--seg-up 2`, `runs/small_360_seg4_cv`)
+
+The runtime has no upsampling layer, so the finer grid is produced by the
+head itself: (C+1) x 4 = 48 segmentation channels per stride-8 cell, read as
+the four 2x2 sub-cells (`pixel_shuffle`, channel c*4 + sy*2 + sx for label c
+of sub-cell (sy, sx)), giving a 90x60 label map at 360x240. The target is
+the label at each sub-cell's centre; everything else (loss, weight_bg = 0.1,
+evaluation) is unchanged. Cost: +1.6 M MACs over the stride-8 head (80.5 M
+total), +1,188 parameters. The C runtime, export and golden test handle the
+layout (`SE_SEG_UP`); the golden test matches all 3 x 5,400 cells.
+
+| Label grid | Ceiling of the grid (cell-centre labels, dev test fold) | mIoU pooled, 5-fold | objects | per fold | Boxes, pooled float / int8 |
+|---|---|---|---|---|---|
+| stride 8 (45x30) | 77.2 | 33.9 (int8 33.8) | 28.2 | 34.0, 39.9, 29.8, 24.2, 35.1 | 52.1 / 52.2 |
+| stride 4 (90x60) | 87.0 | **35.0** (int8 35.0) | **29.4** | 35.3, 42.7, 32.0, 23.1, 35.5 | 52.0 / 53.5 |
+| stride 2 (not run) | 93.2 | - | - | - | - |
+
+Per class, stride 4 gains bottle (+3), tire (+4), shampoo-bottle (+4),
+drink-carton (+3) and propeller (+2) and loses can (-2) and standing-bottle
+(-1); recall and precision move by at most a few points (tire recall 75 ->
+83). Best epochs 68, 96, 91, 142, 84.
+
 ## 4. Discussion
 
 1. **The boxes are unaffected.** Pooled 52.1 against 52.6 +- 1.9 for the
@@ -107,15 +129,18 @@ mIoU against 33.9 float, per fold within 0.2, and every per-class IoU within
    spread. Sharing the backbone with a dense target neither helps nor hurts
    the detector at this capacity.
 2. **The masks are limited by learning, not by the grid.** The stride-8
-   cell representation can reach 77 mIoU; the head reaches 34. Recall is
-   50-75% for the common classes at precision 30-55%, i.e. the head finds
-   most object pixels but also labels background around them (objects are
-   4-10 cells wide, and a one-cell halo costs a large fraction of the IoU
-   of a small object). The remaining levers, in order: an intermediate
-   background weight or a Dice/IoU term in place of the fixed 0.1; a
-   stride-4 output for the segmentation head (one upsampling layer, about
-   2x the head cost, still small); and simply more capacity, since the
-   whole network has 43 k parameters.
+   cell representation can reach 77 mIoU and the stride-4 grid 87; the head
+   reaches 34 and 35. Halving the stride (Section 3.3) is worth +1.1 pooled
+   mIoU, positive on four folds of five, at +1.6 M MACs, and the boxes do
+   not move. Recall is 50-80% for the common classes at precision 30-55%,
+   i.e. the head finds most object pixels but also labels background around
+   them, and the finer grid does not change that pattern, so the halo is a
+   property of the features and the loss rather than of the output
+   resolution. The remaining levers, in order: a Dice/IoU term or an
+   intermediate background weight in place of the fixed 0.1; and more
+   capacity, since the whole network has 43 k parameters and the receptive
+   field that must decide a sub-cell's label is the same 254 px context
+   that decides the boxes.
 3. **Few-scene classes fail as they do for boxes.** Standing-bottle (3.2)
    and valve (5.4) are the classes concentrated in one scene (M0 §3.3);
    the segmentation head cannot learn them from the other folds either.
@@ -127,7 +152,8 @@ mIoU against 33.9 float, per fold within 0.2, and every per-class IoU within
    1350 cells, all equal, on `runs/small_360_seg_cv_f0`). `sonar-detect -s
    DIR` writes one PGM label map per frame. The shipped `weights.h` is the
    box-only 360x240 model (`SE_SEG_COUT` 0); exporting a `--seg` run instead
-   enables the functions with no other change.
+   enables the functions with no other change; `--seg-up 2` models export
+   with `SE_SEG_UP 2` and a 90x60 label map.
 
 ## 5. Limitations
 
@@ -138,5 +164,7 @@ mIoU against 33.9 float, per fold within 0.2, and every per-class IoU within
 - mIoU is measured at the working resolution (360x240) against the
   nearest-resized label map, not at the original 480x320.
 - weight_bg = 0.1 was chosen from a single comparison with 1.0, not swept.
+- The stride-4 result is one seed; its +1.1 is below the ~2-point pooled seed
+  noise of M1 §6.5, although the sign is consistent over four folds.
 - The per-cell target is the centre pixel's label; objects thinner than a
   cell can be missed by the target itself (part of the 77-point ceiling).

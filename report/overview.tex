@@ -574,11 +574,19 @@ this representation: 77.2 mIoU on the development test fold.
     mIoU, pooled & -- & 33.9 \\
     mIoU, object classes & -- & 28.2 \\
     mIoU per fold & -- & 34.0, 39.9, 29.8, 24.2, 35.1 \\
+    \midrule
+    \multicolumn{3}{l}{\emph{Sub-pixel variant: $(C+1) \times 4$ head channels pixel-shuffled to a stride-4 (90$\times$60) label grid, +1.6~M MACs}} \\
+    Box mAP, pooled & & 52.0 (int8 53.5) \\
+    mIoU, pooled & & 35.0 (int8 35.0) \\
+    mIoU, object classes & & 29.4 \\
+    mIoU per fold & & 35.3, 42.7, 32.0, 23.1, 35.5 \\
     \bottomrule
   \end{tabular}
   \caption{Five-fold cross-validation with the segmentation head (seed 0;
-  the box-only row gives seed means and per-fold means). mIoU over the 12
-  labels; ``objects'' over the 11 object classes.}
+  the box-only column gives seed means and per-fold means). mIoU over the 12
+  labels; ``objects'' over the 11 object classes. The ceiling of the
+  cell-centre labelling itself is 77.2 mIoU at stride 8 and 87.0 at stride
+  4 on the development test fold.}
   \label{tab:seg}
 \end{table}
 
@@ -689,13 +697,16 @@ standing-bottle outside its scene; that class is reported as a limitation.
 52.1 pooled against 52.6 $\pm$ 1.9 for the box-only model, with every
 per-class AP inside the seed spread. The masks reach 33.9 mIoU (28.2 over
 the object classes) against a ceiling of 77 for the stride-8 grid, so the
-limit is learning, not representation. Recall is 50--75\% for the common
-classes at precision 30--55\%: the head finds most object pixels and labels
-a halo of background around them, which costs a large fraction of the IoU of
-objects 4--10 cells wide. Standing-bottle and valve fail as they do for
-boxes, for the same one-scene reason. The levers not yet tried are a Dice or
-IoU term in place of the fixed background weight, a stride-4 output for this
-head (one upsampling layer), and more capacity. Quantisation is free for the
+limit is learning, not representation. A sub-pixel head that predicts the
+four $2 \times 2$ sub-cells of each cell (a stride-4 grid, ceiling 87) gains
+1.1 pooled mIoU, positive on four folds, at 1.6~M MACs, and leaves the boxes
+unchanged. Recall is 50--80\% for the common classes at precision 30--55\%
+on both grids: the head finds most object pixels and labels a halo of
+background around them, and the finer grid does not change that, so the
+halo comes from the features and the loss rather than from the output
+resolution. Standing-bottle and valve fail as they do for boxes, for the
+same one-scene reason. The levers not yet tried are a Dice or IoU term in
+place of the fixed background weight, and more capacity. Quantisation is free for the
 masks: the int8 model pools 33.8 mIoU against 33.9. The C runtime emits the
 per-cell label map for models exported with the head (\texttt{se\_segment},
 an argmax on the real-valued channels in the Python operation order); the
@@ -732,8 +743,8 @@ writing.
 
 \paragraph{Segmentation.} Section~\ref{sec:segres} gives the first
 result; the C decoder emits the label map and the quantised model's mIoU
-equals the float one. The next steps are a stride-4 segmentation output and
-a Dice term in the loss.
+equals the float one. The stride-4 output has been tried ($+1.1$ mIoU); the next step is a Dice
+term in the loss.
 
 \section{Conclusions and open items}
 
@@ -754,9 +765,11 @@ a Dice term in the loss.
   runtime takes its geometry from that header.
   \item A segmentation head on the same features costs 0.3~M MACs, leaves
   the boxes unchanged and reaches 33.9 pooled mIoU (28.2 over the object
-  classes) with a background-weighted cross-entropy, against a ceiling of
-  77 for the stride-8 grid; it is a working first version with clear
-  levers left.
+  classes) with a background-weighted cross-entropy; a sub-pixel stride-4
+  variant reaches 35.0 at 1.6~M MACs. The grid ceilings are 77 and 87, so
+  the loss and the features, not the output resolution, are what limits the
+  masks. The C runtime emits the label map for both variants, bit-exact with
+  the Python int8 model.
   \item Open: seed repeats of \cfg{wide}, \cfg{small\_wide}, the
   $480 \times 320$ run and the segmentation model, which have one seed each
   (about $\pm 2$ points);
