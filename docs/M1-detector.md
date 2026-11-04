@@ -458,18 +458,12 @@ Per-fold test mAP (fold 0 to 4; best epoch 102, 145, 72, 101, 61): float
    tire (93.5) and loses chain (35.4) and valve (21.4) relative to 360x240,
    which is consistent with the 360x240 result being near the top of the
    curve rather than on its rising part.
-5. **Seed repeat.** A second seed of the 360x240 model
-   (`runs/small_360_s1_cv`, seed 1) pools 52.2 float / 52.8 int8, per fold
-   61.0, 66.2, 49.2, 46.7, 67.5 (best epochs 79, 122, 98, 124, 108): 2.4
-   pooled points below seed 0, with per-fold differences of -3.0, -0.3,
-   -3.1, -0.3, -0.2. Two seeds give a pooled standard deviation of about
-   1.7 points, consistent with the 3.8-point single-split repeat of Section
-   5 divided by the five-fold pooling. Against `small` (one seed) the
-   360x240 gain is +5.2 and +2.8 for the two seeds, mean +4.0, and seed 1
-   is above `small` on four folds and 0.7 below on fold 2. The
-   recommendation of item 6 stands with that margin. The seed repeat also
-   closes item 3: the int8 difference of seed 1 is +0.6 pooled, positive on
-   three folds, so the consistent negative sign of seed 0 was chance.
+5. **Seed repeats** are in Section 6.5: three seeds each of `small` and of
+   the 360x240 model give pooled means of 48.1 +- 1.1 and 52.6 +- 1.9, a
+   gain of +4.5 that holds on every fold's mean and for every pairing of
+   seeds. The int8 difference changes sign between seeds (+0.3, -0.7,
+   +0.3 for `small`; -0.9, +0.6, -0.6 for 360x240), which closes item 3:
+   quantisation is neutral within seed noise.
 6. **Deployment.** At 78 M MACs the 360x240 model is within the plan's ~100 M
    MAC budget; the C runtime takes the input geometry from the exported
    header, so the only change for deployment is to regenerate `weights.h`
@@ -480,14 +474,74 @@ Per-fold test mAP (fold 0 to 4; best epoch 102, 145, 72, 101, 61): float
    as the recommended alternative where the budget allows. Going to full
    resolution instead (139 M MACs, 2x the cost again) buys nothing (item 4).
 
+### 6.5 Seed repeats under the full protocol
+
+Each configuration above is one training run per fold. To measure how much
+of the differences is training noise, `small` (240x160) and `small` at
+360x240 were each run three times through the complete 5-fold protocol with
+seeds 0, 1, 2 (`runs/small_cv`, `small_s1_cv`, `small_s2_cv`;
+`runs/small_360_cv`, `small_360_s1_cv`, `small_360_s2_cv`; aggregated by
+`sonar-edge seeds`). Everything else is identical.
+
+| | small, 240x160 | small, 360x240 |
+|---|---|---|
+| Pooled mAP, float, per seed | 49.4, 47.4, 47.5 | 54.6, 52.2, 51.0 |
+| Pooled mAP, float, mean (s.d.) | **48.1 (1.1)** | **52.6 (1.9)** |
+| Pooled mAP, int8, mean (s.d.) | 48.1 (1.6) | 52.3 (1.7) |
+| Fold 0, mean (s.d.) | 55.5 (5.4) | 61.0 (3.0) |
+| Fold 1 | 58.5 (0.7) | 65.1 (2.2) |
+| Fold 2 | 48.9 (1.0) | 52.2 (3.0) |
+| Fold 3 | 42.5 (2.7) | 48.2 (2.4) |
+| Fold 4 | 67.4 (0.2) | 67.5 (0.2) |
+
+Per-class pooled AP, mean (s.d.) over the three seeds, float:
+
+| Class | small 240x160 | small 360x240 |
+|---|---|---|
+| Bottle | 73.7 (3.8) | 85.4 (1.6) |
+| Can | 8.0 (1.8) | 15.3 (0.7) |
+| Chain | 27.6 (8.0) | 39.6 (3.3) |
+| Drink-carton | 64.7 (2.9) | 63.1 (9.7) |
+| Hook | 89.0 (2.0) | 90.5 (3.5) |
+| Propeller | 48.8 (2.4) | 47.3 (1.7) |
+| Shampoo-bottle | 27.7 (5.2) | 33.3 (6.7) |
+| Standing-bottle | 1.6 (1.0) | 6.4 (2.9) |
+| Tire | 84.6 (2.9) | 89.3 (4.3) |
+| Valve | 22.7 (1.1) | 26.5 (11.3) |
+| Wall | 81.1 (0.3) | 82.2 (0.5) |
+
+**Discussion.**
+
+1. **Pooled mAP has a seed standard deviation of 1-2 points**, against 3.8
+   for the single-split repeat of Section 5: pooling five independently
+   trained folds averages out most of the training noise, as expected. The
+   per-fold values are noisier, up to 5.4 points on fold 0 of `small`
+   (seeds 60.3, 56.6, 49.6), so a single fold should not be read on its
+   own. The seed-0 values reported in Sections 6.1-6.4 happen to be the
+   best of their three seeds for both configurations; the means are 1.3
+   and 2.0 points lower.
+2. **The resolution gain survives.** 360x240 is above 240x160 by 4.5
+   pooled points on the means, on every fold's mean (by 0.1 to 6.6), and
+   for every one of the nine seed pairings (the worst 360x240 seed, 51.0,
+   is above the best `small` seed, 49.4). The gain is concentrated in
+   bottle (+12), chain (+12), can (+7), tire (+5) and shampoo-bottle (+6);
+   drink-carton and propeller are flat within their spread.
+3. **Which per-class numbers mean anything.** Valve (s.d. 11 at 360x240),
+   drink-carton (10), chain (8), shampoo-bottle (5-7) and standing-bottle
+   move by more between seeds than between configurations; their boxes lie
+   in few scenes, so a change of a few detections' scores reorders the
+   pooled list. Bottle, can, hook, tire and wall have s.d. below 4 and
+   their differences between configurations are interpretable.
+4. **Quantisation is neutral**: the int8 pooled means equal the float means
+   within 0.3, and the sign of the per-seed difference varies.
+
 ## 7. Limitations
 
-- One seed per configuration except the 360x240 model (two seeds, Section
-  6.4, item 5), and GPU training is not bit-reproducible: the measured
-  run-to-run spread is about 4 mAP points on the development split
-  (Section 5) and about 2 points on the pooled 5-fold estimate. The 5-fold
-  protocol with pooled AP (Section 6) is the final evaluation; each fold is
-  a single run.
+- GPU training is not bit-reproducible: the run-to-run spread is about 4
+  mAP points on a single split (Section 5) and 1-2 points on the pooled
+  5-fold estimate (Section 6.5). `small` and the 360x240 model have three
+  seeds under the full protocol; `wide`, `small_wide` and 480x320 have one,
+  so their pooled values carry about +-2 points.
 - No test-time augmentation or ensembling, by design: the C runtime executes
   exactly one forward pass.
 - The Wall class is evaluated like the others although its boxes are large and
