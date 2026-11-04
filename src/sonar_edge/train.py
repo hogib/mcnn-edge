@@ -87,6 +87,9 @@ def cmd_train(args):
     dl = DataLoader(ds["train"], args.bs, shuffle=True, num_workers=0, drop_last=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, args.lr, total_steps=args.epochs * len(dl), pct_start=0.1)
+    # class weights of the segmentation cross-entropy: background down-weighted (it is ~95% of the pixels)
+    seg_w = torch.ones(len(classes) + 1, device=device)
+    seg_w[0] = args.seg_bg_w
     best, log = -1.0, []
     for ep in range(args.epochs):
         model.train()
@@ -98,7 +101,8 @@ def cmd_train(args):
             l_heat = focal_loss(heat, b["heat"])
             l_size = reg_l1(size, b["ind"], b["size"], b["mask"])
             l_off = reg_l1(off, b["ind"], b["off"], b["mask"])
-            l_seg = F.cross_entropy(model.split_seg(o), b["seg"]) if args.seg else torch.zeros((), device=device)
+            l_seg = (F.cross_entropy(model.split_seg(o), b["seg"], weight=seg_w) if args.seg
+                     else torch.zeros((), device=device))
             loss = l_heat + 0.1 * l_size + l_off + args.seg_w * l_seg
             opt.zero_grad()
             loss.backward()
@@ -238,6 +242,7 @@ def main():
     t.add_argument("--aug", choices=["basic", "strong"], default="basic")
     t.add_argument("--seg", action="store_true", help="add a per-cell semantic segmentation head (needs Masks/)")
     t.add_argument("--seg-w", type=float, default=1.0, help="weight of the segmentation cross-entropy")
+    t.add_argument("--seg-bg-w", type=float, default=1.0, help="class weight of background in that cross-entropy")
     t.add_argument("--limit", type=int, default=0, help="use only N frames per split (smoke test)")
     t.add_argument("--out", default="runs/dev")
     folds(t)
