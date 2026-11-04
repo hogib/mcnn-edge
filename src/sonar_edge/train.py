@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from .dataset import dev_datasets
 from .metrics import evaluate
 from .model import Detector, macs
-from .targets import decode, focal_loss, reg_l1
+from .targets import decode, dice_loss, focal_loss, reg_l1
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -103,8 +103,13 @@ def cmd_train(args):
             l_heat = focal_loss(heat, b["heat"])
             l_size = reg_l1(size, b["ind"], b["size"], b["mask"])
             l_off = reg_l1(off, b["ind"], b["off"], b["mask"])
-            l_seg = (F.cross_entropy(model.split_seg(o), b["seg"], weight=seg_w) if args.seg
-                     else torch.zeros((), device=device))
+            if args.seg:
+                sl = model.split_seg(o)
+                l_seg = F.cross_entropy(sl, b["seg"], weight=seg_w)
+                if args.seg_dice > 0:
+                    l_seg = l_seg + args.seg_dice * dice_loss(sl, b["seg"])
+            else:
+                l_seg = torch.zeros((), device=device)
             loss = l_heat + 0.1 * l_size + l_off + args.seg_w * l_seg
             opt.zero_grad()
             loss.backward()
@@ -276,6 +281,7 @@ def main():
     t.add_argument("--seg-w", type=float, default=1.0, help="weight of the segmentation cross-entropy")
     t.add_argument("--seg-bg-w", type=float, default=1.0, help="class weight of background in that cross-entropy")
     t.add_argument("--seg-up", type=int, default=1, help="segmentation grid finer than the stride by this factor (pixel shuffle)")
+    t.add_argument("--seg-dice", type=float, default=0.0, help="weight of a soft Dice term added to the segmentation loss")
     t.add_argument("--limit", type=int, default=0, help="use only N frames per split (smoke test)")
     t.add_argument("--out", default="runs/dev")
     folds(t)

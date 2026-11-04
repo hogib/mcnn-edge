@@ -67,3 +67,18 @@ def test_seg_head_layout():
     assert out.shape[1] == 11 + 4 + 12
     heat, size, off = m.split(out)
     assert heat.shape[1] == 11 and size.shape[1] == 2 and off.shape[1] == 2 and m.split_seg(out).shape[1] == 12
+
+
+def test_dice_loss_bounds_and_perfect_prediction():
+    from sonar_edge.targets import dice_loss
+    target = torch.zeros(2, 6, 8, dtype=torch.int64)
+    target[:, 2:4, 2:5] = 1
+    perfect = torch.full((2, 3, 6, 8), -20.0)
+    perfect[:, 0] = 20.0
+    perfect[:, 1, 2:4, 2:5] = 20.0
+    perfect[:, 0, 2:4, 2:5] = -20.0
+    assert dice_loss(perfect, target) < 0.05
+    wrong = -perfect
+    assert dice_loss(wrong, target) > 0.9
+    uniform = torch.zeros(2, 3, 6, 8)
+    assert 0.0 < dice_loss(uniform, target) < 1.0

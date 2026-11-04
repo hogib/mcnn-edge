@@ -71,6 +71,18 @@ def focal_loss(logits, target):
     return -(pos_loss + neg_loss) / n
 
 
+def dice_loss(logits, target, eps=1.0):
+    """Soft multi-class Dice: 1 - (2 |p ∩ t| + eps) / (|p| + |t| + eps) per class on the softmax
+    probabilities, averaged over the classes present in the batch (background included)."""
+    p = torch.softmax(logits, 1)
+    t = F.one_hot(target, logits.shape[1]).permute(0, 3, 1, 2).to(p.dtype)
+    inter = (p * t).sum((0, 2, 3))
+    card = p.sum((0, 2, 3)) + t.sum((0, 2, 3))
+    present = t.sum((0, 2, 3)) > 0
+    d = 1 - (2 * inter + eps) / (card + eps)
+    return d[present].mean()
+
+
 def gather(feat, ind):
     """feat [B,2,gh,gw], ind [B,K] -> [B,K,2]."""
     B, C = feat.shape[:2]
