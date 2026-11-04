@@ -19,7 +19,7 @@ kernels, int32 biases, per-channel fixed-point multipliers (M, n) and a layer
 table of (c_in, c_out, stride, dilation), together with the input and output
 geometry as preprocessor constants. Every tensor shape is therefore a
 compile-time constant, all working memory is static, and the runtime is built
-with `cc runtime/*.c`. The weights occupy 42 KB (`small`) or 100 KB (`base`) of
+with `cc runtime/*.c`. The weights occupy 42 KB (`small`, at any input size) or 100 KB (`base`) of
 read-only data.
 
 ### 2.2 Memory layout
@@ -32,8 +32,9 @@ with stride s reads, for output (oy, ox) and tap (ky, kx), the padded pixel
 PyTorch's `padding = dilation`. A layer writes its output already padded for
 the next layer; the buffer is zeroed before each layer so borders are zero. The
 buffer size is the largest padded tensor in the network, computed by the
-exporter (160 KB for `small`, 606 KB for `base`); total static memory is twice
-that plus the int32 head map (36 KB / 144 KB).
+exporter (160 KB for `small` at 240x160, 355 KB at the shipped 360x240, 606 KB for
+`base`); total static memory is twice that plus the int32 head map (36 KB / 81 KB /
+144 KB).
 
 With channels innermost, each kernel tap is a dot product over a contiguous
 run of c_in bytes against a contiguous run of c_in weights (`[c_out][ky][kx][c_in]`
@@ -81,7 +82,7 @@ Static buffers make the runtime non-reentrant; a Pi runs one detector.
 ## 3. Verification
 
 `runtime/tests/test_golden.c` runs `se_forward` on the three test frames
-exported by M2 and compares the entire int32 head map (30x20x15 or 60x40x15
+exported by M2 and compares the entire int32 head map (30x20x15, 45x30x15 or 60x40x15
 values) with the Python simulation. For both `small` and `base` the maps are
 identical to the last bit on every cell, i.e. the C arithmetic implements the
 specification of M2 exactly, including BN folding, per-channel scales,
@@ -95,11 +96,13 @@ measured inside `sonar-detect -n` around `se_detect` (network + decoder):
 | Config | Input | MACs / frame | Time / frame | Effective throughput |
 |---|---|---|---|---|
 | small | 240x160 | 34.8 M | 10.0 ms | 3.5 GMAC/s |
+| small (shipped since 2026-11-04) | 360x240 | 78.4 M | 20.1 ms | 3.9 GMAC/s |
 | base | 480x320 | 283.7 M | 71.0 ms | 4.0 GMAC/s |
 
 About 2.5 multiply-accumulates per cycle at 4.4 GHz without vectorisation.
 The Pi 4's Cortex-A72 at 1.5 GHz has lower clock and IPC; an estimate of 3-5x
-these times (35-50 ms for `small`, 250-350 ms for `base`) is to be verified in
+these times (35-50 ms for `small` at 240x160, 70-100 ms at 360x240, 250-350 ms for
+`base`) is to be verified in
 M5, where an optional NEON inner loop is the obvious lever.
 
 ## 5. Build

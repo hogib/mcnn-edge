@@ -85,11 +85,14 @@ network within 5% relative error.
 | small | test | 58.6 | 59.2 | +0.6 |
 | small, 150 ep, strong aug (M1 §5) | val | 55.0 | 53.1 | -1.8 |
 | small, 150 ep, strong aug (M1 §5) | test | 64.1 | 65.2 | +1.1 |
+| small, 360x240, 150 ep, strong aug (M1 §6.4; shipped since 2026-11-04) | val | 59.4 | 57.5 | -1.9 |
+| small, 360x240, 150 ep, strong aug (M1 §6.4; shipped since 2026-11-04) | test | 64.0 | 63.8 | -0.2 |
 
 Per-class test AP changes by at most a few points in either direction
 (largest: base drink-carton 32 -> 37, can 20 -> 30; chain 42 -> 38). Calibrated
 activation ranges span 4.5-9.7 (in units of the input range [0, 1]) across
-layers (5.0-9.6 for the strongly augmented `small` model that is shipped).
+layers (5.0-9.6 for the strongly augmented `small` model at 240x160, 5.0-10.1 for the
+shipped 360x240 model, whose `activation scales` line is in `runs/small_360_cv_f0.log`).
 
 ## 4. Discussion
 

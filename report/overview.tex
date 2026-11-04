@@ -30,8 +30,9 @@ and why, with worked examples; (ii) the detector architecture, its training
 and the configurations evaluated; (iii) the 8-bit quantisation and the C
 runtime that executes it; and (iv) the results obtained to date, including
 the resolution and width ablations, the seed repeats and the segmentation
-head added on 3--4 November. The per-milestone
-notes \texttt{docs/M0}--\texttt{M4} in the repository contain the complete
+head added on 3--4 November, after which the $360 \times 240$ model was made
+the deployed configuration. The per-milestone
+notes \texttt{docs/M0}--\texttt{M6} in the repository contain the complete
 derivations; this report is the consolidated account.
 
 \tableofcontents
@@ -258,8 +259,8 @@ configurations used.
   with batch normalisation and ReLU (stride 1, dilation 1 unless marked); the
   head is a $1{\times}1$ convolution to $C + 4 = 15$ channels. RF is the
   receptive field in pixels of the full-resolution frame; MACs are
-  multiply--accumulates per frame. \cfg{small} is the deployed
-  configuration.}
+  multiply--accumulates per frame. \cfg{small} at $360 \times 240$ is the
+  deployed configuration (since 4 November; $240 \times 160$ before).}
   \label{tab:configs}
 \end{table}
 
@@ -366,7 +367,8 @@ plus a generated header with the 8-bit kernels, 32-bit biases, the
 $(M_c, n_c)$ pairs, the layer table and the tensor geometry as preprocessor
 constants. All memory is static: two activation buffers that alternate as
 input and output, and the 32-bit head map. The \cfg{small} weights occupy
-42~KB.
+42~KB at any input size; the activation buffers are 355~KB each for the
+deployed $360 \times 240$ input.
 
 Activations are stored HWC (channels innermost) with a zero border equal to
 the dilation $d$ of the consuming layer, so that a $3 \times 3$ convolution
@@ -397,19 +399,20 @@ line.
 Two checks tie the C runtime to the Python reference. The golden test
 compares the full 32-bit head map from \texttt{se\_forward} on the three
 exported frames with the reference and requires equality on every one of the
-$30 \times 20 \times 15$ values; it passes. The end-to-end test runs the
+$45 \times 30 \times 15$ values; it passes. The end-to-end test runs the
 compiled binary over the whole development test fold and scores its output
-with the same metric and ground truth as the Python models: 65.17\% mAP in C
-against 65.16\% for the Python reference, the residual coming from the order
-of detections with exactly equal scores. The accuracy of the deployed system
+with the same metric and ground truth as the Python models: 63.81\% mAP in C
+against 63.80\% for the Python reference for the deployed $360 \times 240$
+model (65.17 against 65.16 for the earlier $240 \times 160$ one), the
+residual coming from the order of detections with exactly equal scores. The accuracy of the deployed system
 is therefore established by the cross-validation of
 Section~\ref{sec:results}; only speed and energy remain to be measured on
 the device.
 
 On one core of a laptop CPU (AMD Ryzen 5 5600H, scalar code, \texttt{-O2})
-the deployed configuration takes \SI{10}{ms} per frame, about 3.5~GMAC/s. A
-Raspberry Pi 4 is expected to need 35--50~ms per frame; this measurement
-awaits hardware.
+the deployed $360 \times 240$ model takes \SI{20}{ms} per frame, about
+3.9~GMAC/s (the $240 \times 160$ model: \SI{10}{ms}). A Raspberry Pi 4 is
+expected to need 70--100~ms per frame; this measurement awaits hardware.
 
 \section{Results}
 \label{sec:results}
@@ -429,7 +432,8 @@ deployed configuration.
     Configuration & Input & MACs & Val.\ mAP & Test mAP, float & Test mAP, int8 / C \\
     \midrule
     \cfg{base} & $480{\times}320$ & 284 M & 66.1 & 63.1 & -- \\
-    \cfg{small} (deployed) & $240{\times}160$ & 35 M & 55.0 & 64.1 & 65.2 / 65.17 \\
+    \cfg{small} & $240{\times}160$ & 35 M & 55.0 & 64.1 & 65.2 / 65.17 \\
+    \cfg{small} (deployed) & $360{\times}240$ & 78 M & 59.4 & 64.0 & 63.8 / 63.81 \\
     \cfg{wide} & $480{\times}320$ & 450 M & 67.8 & 68.8 & -- \\
     \cfg{small}, repeat & $240{\times}160$ & 35 M & 59.9 & 60.3 & -- \\
     \bottomrule
@@ -453,8 +457,8 @@ per-class average precision. All runs: 150 epochs, strong augmentation, seed
     \toprule
     Configuration & MACs & Pooled, float & Pooled, int8 & Fold mean (s.d.) & Per-fold float, folds 0--4 \\
     \midrule
-    \cfg{small} (deployed) & 35 M & 49.4 & 49.7 & 56.4 (8.9) & 60.3, 59.3, 49.9, 44.9, 67.4 \\
-    \cfg{small}, $360{\times}240$ & 78 M & 54.6 & 53.7 & 59.5 (9.3) & 64.0, 66.5, 52.3, 47.0, 67.7 \\
+    \cfg{small} & 35 M & 49.4 & 49.7 & 56.4 (8.9) & 60.3, 59.3, 49.9, 44.9, 67.4 \\
+    \cfg{small}, $360{\times}240$ (deployed) & 78 M & 54.6 & 53.7 & 59.5 (9.3) & 64.0, 66.5, 52.3, 47.0, 67.7 \\
     \cfg{small}, $360{\times}240$, seed 1 & 78 M & 52.2 & 52.8 & 58.1 (9.6) & 61.0, 66.2, 49.2, 46.7, 67.5 \\
     \cfg{small}, $480{\times}320$ & 139 M & 54.1 & 53.9 & 61.6 (9.8) & 64.9, 65.8, 57.6, 47.0, 72.7 \\
     \cfg{small\_wide} & 90 M & 50.2 & 49.6 & 58.0 (11.9) & 60.1, 63.3, 51.1, 42.2, 73.4 \\
@@ -499,8 +503,8 @@ per-class average precision. All runs: 150 epochs, strong augmentation, seed
 \label{sec:seeds}
 
 Each cross-validation result above is one training run per fold. To
-measure the training noise under the full protocol, the deployed
-configuration and the $360 \times 240$ model were each run three times
+measure the training noise under the full protocol, the $240 \times 160$
+and the $360 \times 240$ model were each run three times
 through all five folds with seeds 0, 1 and 2, everything else unchanged
 (Table~\ref{tab:seeds}; seed 0 is the run reported in Table~\ref{tab:cv}).
 
@@ -712,14 +716,15 @@ CC=aarch64-linux-gnu-gcc}. The plan: (i)~\texttt{make test} on the Pi, which
 must reproduce the golden head maps bit for bit, as the arithmetic is
 integer-only and platform-independent; (ii)~latency with \texttt{sonar-detect
 -n} over the 439 development test frames, reporting mean and 95th percentile
-per frame for the deployed $240 \times 160$ model and the $360 \times 240$
-candidate, single core, then with the optional NEON inner loop;
+per frame for the deployed $360 \times 240$ model and the $240 \times 160$
+fallback, single core, then with the optional NEON inner loop;
 (iii)~energy with an inline USB-C power meter (or an INA219 on the 5~V rail)
 sampled at 1~Hz, as the difference between loaded and idle power divided by
 the frame rate, giving joules per frame, plus the idle baseline of the board.
-Expected values from the laptop measurement are 35--50~ms per frame for the
-deployed model and 80--110~ms for $360 \times 240$ on a Pi~4; these are
-estimates until measured. The hardware was not available at the time of
+Expected values from the laptop measurement are 70--100~ms per frame for the
+deployed model and 35--50~ms for the $240 \times 160$ fallback on a Pi~4;
+these are estimates until measured, and the fallback is kept in case the
+deployed model's latency is too high for the application. The hardware was not available at the time of
 writing.
 
 \paragraph{Segmentation.} Section~\ref{sec:segres} gives the first
@@ -733,19 +738,17 @@ the quantised model.
   \item The scene-fold protocol is in place and fixed. It removes the
   near-duplicate leak of random splits at the price of large fold-to-fold
   variation, which is a property of the dataset.
-  \item The deployed configuration, \cfg{small} at $240 \times 160$, reaches
-  48.1 $\pm$ 1.1\% pooled mAP over three seeds (48.1\% quantised) at 35~M MACs and 10~ms per frame on a
-  laptop core. The C runtime is bit-exact with the Python int8 reference and
-  scores identically on the test fold.
+  \item The deployed configuration, \cfg{small} at $360 \times 240$
+  (78~M MACs, 42~k parameters), reaches 52.6 $\pm$ 1.9\% pooled mAP over
+  three seeds (52.3\% quantised) and 20~ms per frame on a laptop core. The
+  C runtime is bit-exact with the Python int8 reference and scores
+  identically on the test fold (63.81 against 63.80). The $240 \times 160$
+  model (48.1 $\pm$ 1.1\%, 35~M MACs, 10~ms) is kept as the fallback.
   \item Input resolution, not channel width, is what the larger reference
   model gains from, and the gain saturates at $360 \times 240$ for this
-  network. \cfg{small} at $360 \times 240$ gives 52.6 $\pm$ 1.9\% over
-  three seeds (52.3\% quantised) against 48.1 $\pm$ 1.1\% for the deployed
-  model, at 78~M MACs, and is the recommended replacement if the latency
-  measured on the target device allows it; deployment needs only a
-  regenerated weight header, since the runtime takes its geometry from that
-  header. Expected cost: about 22~ms per frame on the laptop, 80--110~ms on
-  a Pi 4.
+  network; this is why the deployed resolution was raised on 4 November.
+  The deployment change needed only a regenerated weight header, since the
+  runtime takes its geometry from that header.
   \item A segmentation head on the same features costs 0.3~M MACs, leaves
   the boxes unchanged and reaches 33.9 pooled mIoU (28.2 over the object
   classes) with a background-weighted cross-entropy, against a ceiling of

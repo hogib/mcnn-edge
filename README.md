@@ -3,6 +3,13 @@
 Marine-debris detection on forward-looking sonar frames, trained in Python and
 deployed as a dependency-free C11 runtime on a Raspberry Pi. See `docs/PLAN.md`.
 
+## Shipped model
+
+`runtime/weights.h` is `small` at 360x240 (78 M MACs; `runs/small_360_cv_f0`): pooled 5-fold mAP
+52.6 +- 1.9 over three seeds, 63.8 mAP on the development test fold in C (bit-exact with the
+Python int8 model), 20 ms per frame on one laptop core. Regenerate with
+`uv run python -m sonar_edge.export_c runs/<run> && make -C runtime clean all test`.
+
 ## Segmentation
 
 The dataset's pixel labels (`Masks/`, fetch them into the sparse checkout) train an optional

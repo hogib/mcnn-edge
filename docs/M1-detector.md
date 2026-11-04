@@ -210,7 +210,7 @@ measure of fold-to-fold variation. The float model and its post-training int8
 quantisation (M2) are both pooled, since the C runtime reproduces the latter
 exactly (M4).
 
-### 6.1 Results: `small`, strong augmentation, 150 epochs (the shipped configuration)
+### 6.1 Results: `small`, strong augmentation, 150 epochs (shipped until 4 November; see 6.4)
 
 Pooled AP over all 1,868 frames (every scene tested once), float model and its
 int8 quantisation; the number of boxes is the support of each class in the
@@ -469,10 +469,19 @@ Per-fold test mAP (fold 0 to 4; best epoch 102, 145, 72, 101, 61): float
    header, so the only change for deployment is to regenerate `weights.h`
    from a 360x240 run. The expected cost is about 22 ms per frame on the
    laptop (2.25x the 9.9 ms of M4) and 80-110 ms on a Pi 4 by the M3
-   estimate. The choice between the two is a latency decision: `small`
-   stays the shipped configuration in this document, with the 360x240 model
-   as the recommended alternative where the budget allows. Going to full
-   resolution instead (139 M MACs, 2x the cost again) buys nothing (item 4).
+   estimate. Going to full resolution instead (139 M MACs, 2x the cost
+   again) buys nothing (item 4).
+7. **Shipped on 4 November.** After the seed repeats of Section 6.5
+   confirmed the gain, `runtime/weights.h` and the golden vectors were
+   regenerated from `runs/small_360_cv_f0`, the seed-0 run of this
+   configuration on the development split (val 59.4 / test 64.0 float,
+   int8 63.8; seed 0 is the default seed used for every configuration, not
+   a seed selected on the test fold). The golden test passes bit-exact on
+   the 45x30x15 head map, the C binary scores 63.81 mAP on the test fold
+   against 63.80 for the Python int8 model (M4), and the laptop cost is
+   20.1 ms per frame (M3). The 240x160 model remains available as
+   `runs/small_e150_aug` and is the fallback if the Pi latency of the
+   360x240 model turns out too high.
 
 ### 6.5 Seed repeats under the full protocol
 
