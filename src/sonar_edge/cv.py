@@ -97,3 +97,51 @@ def cmd_cv(args):
     dest = prefix.parent / f"{prefix.name}_cv.json"
     dest.write_text(json.dumps(out, indent=1))
     print(f"wrote {dest.relative_to(ROOT)}")
+
+
+def seed_summary(cv_files):
+    """Aggregate several `_cv.json` files (same configuration, different seeds): per-seed pooled
+    mAP, and mean/sd over seeds of the pooled mAP, of each fold's mAP and of each class's pooled AP."""
+    runs = [json.loads(Path(f).read_text()) for f in cv_files]
+    assert len({r["k"] for r in runs}) == 1 and len({r["scale"] for r in runs}) == 1, "mixed k or scale"
+    classes = list(runs[0]["n_test_boxes"])
+    out = {"prefixes": [r["prefix"] for r in runs], "n_seeds": len(runs), "k": runs[0]["k"], "scale": runs[0]["scale"]}
+    sd = (lambda x: float(np.std(x, ddof=1))) if len(runs) > 1 else (lambda x: None)
+    for v in ("float", "int8"):
+        if not all(v in r for r in runs):
+            continue
+        pooled = [r[v]["map_pooled"] for r in runs]
+        folds = np.array([r[v]["map_per_fold"] for r in runs])  # seeds x k
+        ap = {c: [r[v]["ap_pooled"][c] for r in runs] for c in classes}
+        out[v] = {
+            "map_pooled_per_seed": pooled,
+            "map_pooled_mean": float(np.mean(pooled)), "map_pooled_sd": sd(pooled),
+            "map_per_fold_per_seed": folds.tolist(),
+            "map_per_fold_mean": folds.mean(0).tolist(),
+            "map_per_fold_sd": folds.std(0, ddof=1).tolist() if len(runs) > 1 else None,
+            "ap_pooled_mean": {c: (None if any(a is None for a in ap[c]) else float(np.mean(ap[c]))) for c in classes},
+            "ap_pooled_sd": {c: (None if any(a is None for a in ap[c]) or len(runs) < 2 else sd(ap[c])) for c in classes},
+        }
+    return out
+
+
+def cmd_seeds(args):
+    files = [ROOT / f"{p}_cv.json" for p in args.prefixes]
+    out = seed_summary(files)
+    cols = [v for v in ("float", "int8") if v in out]
+    pm = lambda m, s: f"{100 * m:5.1f} +- {100 * s:3.1f}" if s is not None else f"{100 * m:5.1f}"
+    print(f"{out['n_seeds']} seeds of {', '.join(out['prefixes'])}")
+    for v in cols:
+        o = out[v]
+        print(f"[{v}] pooled mAP per seed: " + " ".join(f"{100 * x:.1f}" for x in o["map_pooled_per_seed"])
+              + f"   mean {pm(o['map_pooled_mean'], o['map_pooled_sd'])}")
+        for k in range(out["k"]):
+            col = [s[k] for s in o["map_per_fold_per_seed"]]
+            print(f"   fold {k}: " + " ".join(f"{100 * x:.1f}" for x in col)
+                  + f"   mean {pm(o['map_per_fold_mean'][k], o['map_per_fold_sd'][k] if o['map_per_fold_sd'] else None)}")
+    print(f"{'class (pooled AP)':20s}" + "".join(f"{v:>16s}" for v in cols))
+    for c in out[cols[0]]["ap_pooled_mean"]:
+        print(f"{c:20s}" + "".join(f"{pm(out[v]['ap_pooled_mean'][c], out[v]['ap_pooled_sd'][c]):>16s}" for v in cols))
+    dest = ROOT / f"{args.prefixes[0]}_seeds.json"
+    dest.write_text(json.dumps(out, indent=1))
+    print(f"wrote {dest.relative_to(ROOT)}")

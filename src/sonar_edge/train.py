@@ -150,6 +150,12 @@ def cmd_quantize(args):
     print(f"wrote {out / 'int_model.json'}, {out / 'golden.npz'}, {out / 'quant_results.json'}")
 
 
+def _cmd_seeds(args):
+    from .cv import cmd_seeds
+
+    cmd_seeds(args)
+
+
 def _cmd_cv(args):
     from .cv import cmd_cv
 
@@ -209,6 +215,9 @@ def main():
     cv.add_argument("prefix", help="run prefix, e.g. runs/small_cv")
     cv.add_argument("--k", type=int, default=5)
     cv.set_defaults(func=_cmd_cv)
+    sd = sub.add_parser("seeds", help="mean/sd over seeds of several runs/<prefix>_cv.json (same config)")
+    sd.add_argument("prefixes", nargs="+", help="run prefixes, e.g. runs/small_cv runs/small_s1_cv")
+    sd.set_defaults(func=_cmd_seeds)
 
     args = p.parse_args()
     args.func(args)

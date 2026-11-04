@@ -46,3 +46,21 @@ def test_load_pred_roundtrip(tmp_path):
     p = tmp_path / "pred.json"
     p.write_text(json.dumps({"7": [[1, 0.5, 1, 2, 3, 4]]}))
     assert load_pred(p) == {7: [(1, 0.5, 1, 2, 3, 4)]}
+
+
+def test_seed_summary(tmp_path):
+    from sonar_edge.cv import seed_summary
+    classes = ["A", "B"]
+    files = []
+    for i, (pooled, folds) in enumerate([(0.50, [0.6, 0.4]), (0.54, [0.7, 0.5])]):
+        d = {"prefix": f"runs/x_s{i}", "k": 2, "scale": 2, "n_test_boxes": {"A": 3, "B": 4},
+             "float": {"map_pooled": pooled, "map_per_fold": folds, "ap_pooled": {"A": pooled + 0.1, "B": None}}}
+        f = tmp_path / f"x_s{i}_cv.json"
+        f.write_text(json.dumps(d))
+        files.append(f)
+    out = seed_summary(files)
+    assert out["n_seeds"] == 2 and "int8" not in out
+    assert abs(out["float"]["map_pooled_mean"] - 0.52) < 1e-9
+    assert abs(out["float"]["map_pooled_sd"] - np.std([0.50, 0.54], ddof=1)) < 1e-9
+    assert np.allclose(out["float"]["map_per_fold_mean"], [0.65, 0.45])
+    assert abs(out["float"]["ap_pooled_mean"]["A"] - 0.62) < 1e-9 and out["float"]["ap_pooled_mean"]["B"] is None
