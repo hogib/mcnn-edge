@@ -122,6 +122,41 @@ drink-carton (+3) and propeller (+2) and loses can (-2) and standing-bottle
 (-1); recall and precision move by at most a few points (tire recall 75 ->
 83). Best epochs 68, 96, 91, 142, 84.
 
+### 3.4 Dice term (`--seg-dice 1`, `runs/small_360_segdice_cv`)
+
+A soft multi-class Dice loss, 1 - (2 |p ∩ t| + 1) / (|p| + |t| + 1) per
+class on the softmax probabilities, averaged over the classes present in
+the batch (background included), is added with weight 1 to the weighted
+cross-entropy of Section 3.3; nothing else changes (stride-4 head,
+weight_bg = 0.1, seed 0).
+
+| | stride-8 head (3.2) | stride-4 head (3.3) | stride-4 + Dice |
+|---|---|---|---|
+| mIoU pooled (int8) | 33.9 (33.8) | 35.0 (35.0) | **41.2** (41.3) |
+| mIoU, object classes | 28.2 | 29.4 | **36.1** |
+| mIoU per fold | 34.0, 39.9, 29.8, 24.2, 35.1 | 35.3, 42.7, 32.0, 23.1, 35.5 | 40.0, 49.0, 39.0, 31.0, 40.4 |
+| Boxes, pooled mAP float (int8) | 52.1 (52.2) | 52.0 (53.5) | **49.8** (49.0) |
+| Boxes per fold | 61.7, 67.6, 48.2, 48.7, 66.3 | 67.9, 61.4, 49.7, 47.1, 68.2 | 57.5, 66.0, 46.2, 47.4, 66.5 |
+| Box-only reference, 3 seeds | | | 52.6 +- 1.9; per fold 61.0, 65.1, 52.2, 48.2, 67.5 |
+
+Per-class IoU with Dice: bottle 45.4 (+9), drink-carton 44.3 (+14), tire
+56.2 (+6), hook 37.9 (+15), propeller 31.9 (+6), can 33.2 (+8), chain 34.5
+(+2), wall 67.5 (+4); standing-bottle 7.1 and valve 8.7 stay low. The gain
+is almost entirely precision: bottle 42 -> 54, drink-carton 38 -> 64, tire
+56 -> 74, hook 27 -> 48, propeller 37 -> 50, at recall within a few points
+of before (bottle 72 -> 75, tire 83 -> 70, drink-carton 61 -> 59). The halo
+of Section 4, item 2 is what the Dice term removes. Best epochs 60, 95, 78,
+113, 104.
+
+The boxes lose 2.2 pooled points against the stride-4 run and 2.8 against
+the three-seed box-only mean, i.e. about 1.5 seed standard deviations, with
+per-fold differences to the box-only means of -3.5, +0.9, -6.0, -0.8, -1.0.
+The per-class box losses are in chain (-7), tire (-4), shampoo-bottle (-7)
+and valve (-14), the last two among the seed-noisy classes; can (+4) and
+drink-carton (+1) gain. One seed, so this is suggestive rather than
+established, but it is the first segmentation setting whose box mAP is
+below every seed of the box-only model.
+
 ## 4. Discussion
 
 1. **The boxes are unaffected.** Pooled 52.1 against 52.6 +- 1.9 for the
@@ -136,11 +171,18 @@ drink-carton (+3) and propeller (+2) and loses can (-2) and standing-bottle
    i.e. the head finds most object pixels but also labels background around
    them, and the finer grid does not change that pattern, so the halo is a
    property of the features and the loss rather than of the output
-   resolution. The remaining levers, in order: a Dice/IoU term or an
-   intermediate background weight in place of the fixed 0.1; and more
-   capacity, since the whole network has 43 k parameters and the receptive
-   field that must decide a sub-cell's label is the same 254 px context
-   that decides the boxes.
+   resolution. The Dice term (Section 3.4) confirms this: it raises
+   precision by 10-25 points per class and mIoU by 6.2 pooled, on every
+   fold, with the same grid and features.
+5. **Multi-task trade-off.** With cross-entropy only, the boxes were
+   unaffected by the segmentation head (items 1 and 2). With the Dice term
+   the masks improve and the boxes lose about 3 pooled points (Section
+   3.4): the shared 43 k-parameter backbone is now pulled towards the
+   dense objective. The two ways out are a smaller Dice weight (0.3 rather
+   than 1) and a wider head or backbone; which one restores the boxes
+   without giving back the masks is the next experiment. Until then the
+   box-only model stays shipped, and the Dice model is the segmentation
+   reference.
 3. **Few-scene classes fail as they do for boxes.** Standing-bottle (3.2)
    and valve (5.4) are the classes concentrated in one scene (M0 §3.3);
    the segmentation head cannot learn them from the other folds either.
@@ -165,6 +207,9 @@ drink-carton (+3) and propeller (+2) and loses can (-2) and standing-bottle
   nearest-resized label map, not at the original 480x320.
 - weight_bg = 0.1 was chosen from a single comparison with 1.0, not swept.
 - The stride-4 result is one seed; its +1.1 is below the ~2-point pooled seed
-  noise of M1 §6.5, although the sign is consistent over four folds.
+  noise of M1 §6.5, although the sign is consistent over four folds. The
+  Dice result is also one seed; its +6.2 mIoU is well outside that noise,
+  its -2.8 box mAP is at about 1.5 standard deviations and needs a seed
+  repeat before it is acted on.
 - The per-cell target is the centre pixel's label; objects thinner than a
   cell can be missed by the target itself (part of the 77-point ceiling).

@@ -580,6 +580,13 @@ this representation: 77.2 mIoU on the development test fold.
     mIoU, pooled & & 35.0 (int8 35.0) \\
     mIoU, object classes & & 29.4 \\
     mIoU per fold & & 35.3, 42.7, 32.0, 23.1, 35.5 \\
+    \midrule
+    \multicolumn{3}{l}{\emph{Stride-4 head with a soft Dice term (weight 1) added to the weighted cross-entropy}} \\
+    Box mAP, pooled & & 49.8 (int8 49.0) \\
+    Box mAP per fold & & 57.5, 66.0, 46.2, 47.4, 66.5 \\
+    mIoU, pooled & & 41.2 (int8 41.3) \\
+    mIoU, object classes & & 36.1 \\
+    mIoU per fold & & 40.0, 49.0, 39.0, 31.0, 40.4 \\
     \bottomrule
   \end{tabular}
   \caption{Five-fold cross-validation with the segmentation head (seed 0;
@@ -705,8 +712,16 @@ on both grids: the head finds most object pixels and labels a halo of
 background around them, and the finer grid does not change that, so the
 halo comes from the features and the loss rather than from the output
 resolution. Standing-bottle and valve fail as they do for boxes, for the
-same one-scene reason. The levers not yet tried are a Dice or IoU term in
-place of the fixed background weight, and more capacity. Quantisation is free for the
+same one-scene reason. A soft Dice term added to the loss removes most of
+the halo: precision rises by 10--25 points per class at unchanged recall,
+and pooled mIoU reaches 41.2, up 6.2 on every fold. The boxes, however,
+fall to 49.8 pooled, 2.8 below the three-seed box-only mean (about 1.5
+standard deviations; per-fold differences $-3.5$, $+0.9$, $-6.0$, $-0.8$,
+$-1.0$), the first segmentation setting to cost the detector anything. With
+cross-entropy alone the shared backbone served both tasks; the Dice term
+pulls it towards the dense objective. A smaller Dice weight or a wider
+backbone are the two candidate remedies, untested. The box-only model
+stays deployed. Quantisation is free for the
 masks: the int8 model pools 33.8 mIoU against 33.9. The C runtime emits the
 per-cell label map for models exported with the head (\texttt{se\_segment},
 an argmax on the real-valued channels in the Python operation order); the
@@ -743,8 +758,9 @@ writing.
 
 \paragraph{Segmentation.} Section~\ref{sec:segres} gives the first
 result; the C decoder emits the label map and the quantised model's mIoU
-equals the float one. The stride-4 output has been tried ($+1.1$ mIoU); the next step is a Dice
-term in the loss.
+equals the float one. The stride-4 output ($+1.1$ mIoU) and the Dice term ($+6.2$ mIoU, $-2.8$
+box mAP) have been tried; the next step is a Dice weight below 1, with a
+seed repeat, to find the setting that keeps the box accuracy.
 
 \section{Conclusions and open items}
 
@@ -766,10 +782,11 @@ term in the loss.
   \item A segmentation head on the same features costs 0.3~M MACs, leaves
   the boxes unchanged and reaches 33.9 pooled mIoU (28.2 over the object
   classes) with a background-weighted cross-entropy; a sub-pixel stride-4
-  variant reaches 35.0 at 1.6~M MACs. The grid ceilings are 77 and 87, so
-  the loss and the features, not the output resolution, are what limits the
-  masks. The C runtime emits the label map for both variants, bit-exact with
-  the Python int8 model.
+  variant reaches 35.0 at 1.6~M MACs, and adding a Dice term 41.2, at a cost
+  of about 3 box mAP points that a smaller Dice weight may recover. The
+  grid ceilings are 77 and 87, so the loss and the features, not the output
+  resolution, are what limits the masks. The C runtime emits the label map
+  for all variants, bit-exact with the Python int8 model.
   \item Open: seed repeats of \cfg{wide}, \cfg{small\_wide}, the
   $480 \times 320$ run and the segmentation model, which have one seed each
   (about $\pm 2$ points);
