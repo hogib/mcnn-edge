@@ -453,6 +453,7 @@ per-class average precision. All runs: 150 epochs, strong augmentation, seed
 \begin{table}[h]
   \centering
   \small
+  \resizebox{\textwidth}{!}{%
   \begin{tabular}{lrcccl}
     \toprule
     Configuration & MACs & Pooled, float & Pooled, int8 & Fold mean (s.d.) & Per-fold float, folds 0--4 \\
@@ -462,12 +463,15 @@ per-class average precision. All runs: 150 epochs, strong augmentation, seed
     \cfg{small}, $360{\times}240$, seed 1 & 78 M & 52.2 & 52.8 & 58.1 (9.6) & 61.0, 66.2, 49.2, 46.7, 67.5 \\
     \cfg{small}, $480{\times}320$ & 139 M & 54.1 & 53.9 & 61.6 (9.8) & 64.9, 65.8, 57.6, 47.0, 72.7 \\
     \cfg{small\_wide} & 90 M & 50.2 & 49.6 & 58.0 (11.9) & 60.1, 63.3, 51.1, 42.2, 73.4 \\
-    \cfg{small\_wide}, $360{\times}240$, 2 seeds & 204 M & 59.0, 53.9 & 58.8, 53.7 & 65.7 (7.7), 61.4 (6.5) & 70.4, 72.2, 59.2, 55.5, 71.3; 64.4, 65.6, 57.4, 52.0, 67.8 \\
+    \cfg{small48}, $360{\times}240$ & 132 M & 50.9 & 50.5 & 57.7 (10.3) & 62.6, 68.9, 53.6, 42.1, 61.3 \\
+    \cfg{small\_wide}, $360{\times}240$, 3 seeds$^{a}$ & 204 M & 56.9 (2.7) & 56.7 (2.6) & 63.3 & 67.7, 68.0, 58.1, 52.0, 70.9 \\
     \cfg{wide} & 450 M & 55.2 & 56.2 & 62.8 (8.3) & 66.9, 68.6, 55.7, 52.1, 70.5 \\
     \bottomrule
-  \end{tabular}
+  \end{tabular}}
   \caption{Five-fold cross-validation (mAP@0.5 in \%, pooled over all 1\,868
-  frames). Seed 0 unless stated.}
+  frames). Seed 0 unless stated. $^{a}$Mean (s.d.) over seeds 0, 1, 2:
+  pooled 59.0, 53.9, 57.8 (int8 58.8, 53.7, 57.6); per-fold columns are
+  means over the seeds.}
   \label{tab:cv}
 \end{table}
 
@@ -668,17 +672,21 @@ better than $360 \times 240$ ($-0.5$; per-fold $+0.9$, $-0.7$, $+5.3$, $0.0$,
 $+5.0$) and 1.1 below \cfg{wide}, so the resolution curve of the \cfg{small}
 network is 49.4, 54.6, 54.1 for 35, 78, 139~M MACs and saturates at
 $360 \times 240$. The two factors interact, however: the 64-channel
-\cfg{small\_wide} stack, worth $+0.8$ at $240 \times 160$, is worth $+3.8$
-at $360 \times 240$ on a two-seed mean (56.4 $\pm$ 3.6 against 52.6 $\pm$
-1.9), with every fold mean up by 0.3 to 6.6, and it equals or exceeds
-\cfg{wide} at $480 \times 320$ (55.2, one seed) at 45\% of its compute
-(204~M MACs). The two seeds differ by 5.1 points (59.0 and 53.9), the
-largest seed spread observed, carried by the pooled-AP-sensitive classes
-(standing-bottle 39.6 against 13.6, bottle 86.6 against 76.6); the stable
-gains are drink-carton (85.6 and 83.9, from 63.1) and tire. The 32-channel
-stack therefore limits the deployed model once the input carries the small
-objects, by an amount that a third seed would pin down. At 2.6$\times$ the
-deployed cost this is the accuracy reference rather than a deployment
+\cfg{small\_wide} stack, worth $+0.8$ at $240 \times 160$, is worth $+4.3$
+at $360 \times 240$ on three-seed means (56.9 $\pm$ 2.7 against 52.6 $\pm$
+1.9), with every fold mean up by 2.9 to 6.7 and each seed above the
+\cfg{small} run of the same seed, and it equals or exceeds \cfg{wide} at
+$480 \times 320$ (55.2, one seed) at 45\% of its compute (204~M MACs). The
+seeds span 5.1 points (59.0, 53.9, 57.8), the largest seed spread observed,
+carried by the pooled-AP-sensitive classes (standing-bottle 39.6, 13.6,
+17.7; valve 25.4, 18.1, 34.5); the stable gains are drink-carton (82--86,
+from 63.1) and tire. The 32-channel stack therefore limits the deployed
+model once the input carries the small objects. The interpolation does not
+follow: a 48-channel stack (\cfg{small48}, 132~M MACs, one seed) pools
+50.9, inside the \cfg{small} seed range, so the width gain appears only at
+64 channels. At 2.6$\times$ the deployed cost \cfg{small\_wide} was set
+aside as the accuracy reference; the Raspberry Pi measurement (separate
+report) puts it at 46.5~ms per frame, which makes it a deployment
 candidate.
 
 \paragraph{Quantisation.} Post-training 8-bit quantisation is neutral for
@@ -780,7 +788,7 @@ these are estimates until measured, and the fallback is kept in case the
 deployed model's latency is too high for the application. \emph{Update,
 10 November:} measured on a Raspberry Pi~4. The output is byte-identical to the
 laptop's; with a NEON kernel added to the runtime the deployed model takes
-22.5~ms per frame on one core (126~ms scalar) and four cores process 149
+20.3~ms per frame on one core (126~ms scalar) and four cores process 187
 frames per second. Energy was not measured. Details in the separate report
 \texttt{report/deployment.pdf}.
 
@@ -807,9 +815,10 @@ feature branch for the masks.
   \item Input resolution is what the deployed network gains from, and the
   gain saturates at $360 \times 240$; this is why the deployed resolution
   was raised on 4 November. Width pays only once the resolution is there:
-  the 64-channel stack at $360 \times 240$ reaches 56.4 $\pm$ 3.6 pooled
-  mAP over two seeds, at least the equal of the 13$\times$ costlier
-  \cfg{wide}, at 204~M MACs, and is the accuracy reference.
+  the 64-channel stack at $360 \times 240$ reaches 56.9 $\pm$ 2.7 pooled
+  mAP over three seeds, at least the equal of the 13$\times$ costlier
+  \cfg{wide}, at 204~M MACs, and is the accuracy reference; a 48-channel
+  stack gives no measurable gain (50.9, one seed).
   The deployment change needed only a regenerated weight header, since the
   runtime takes its geometry from that header.
   \item A segmentation head on the same features costs 0.3~M MACs, leaves
@@ -824,14 +833,11 @@ feature branch for the masks.
   for all variants, bit-exact with the Python int8 model.
   \item Open: seed repeats of \cfg{wide}, \cfg{small\_wide} at
   $240 \times 160$, the $480 \times 320$ run and the segmentation models
-  other than Dice-1, which have one seed each (about $\pm 2$ points), and
-  a third seed of \cfg{small\_wide} at $360 \times 240$ (two seeds 5
-  points apart); a 48-channel stack at $360 \times 240$ (about 140~M MACs)
-  as the point between the deployed model and the reference;
-  the latency and energy measurement on the Raspberry Pi (M5), for which
-  the runtime cross-compiles with \texttt{make CC=aarch64-linux-gnu-gcc}.
-  \item Known limits of the evaluation: three seeds for two
-  configurations, one for the others;
+  other than Dice-1, which have one seed each (about $\pm 2$ points);
+  the energy measurement on the Raspberry Pi (latency was measured on
+  10 November, separate report).
+  \item Known limits of the evaluation: three seeds for three
+  configurations, one for most others;
   standing-bottle is evaluable only under one fold assignment with four
   training instances; Wall is scored like the other classes although its
   boxes are large and loosely defined; the scene rule errs toward too few

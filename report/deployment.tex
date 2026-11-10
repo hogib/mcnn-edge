@@ -20,10 +20,6 @@
 \definecolor{s3}{HTML}{1baf7a}
 \definecolor{inkmuted}{HTML}{6b6a64}
 
-% wide@480 NEON numbers (filled in when the run completes)
-\newcommand{\wneonlat}{140.9}
-\newcommand{\wneonspeed}{4.7}
-\newcommand{\wneongmac}{3.20}
 
 \begin{document}
 
@@ -45,7 +41,7 @@ one core and on all four; (iii) how much memory and storage the program
 needs; and (iv) how the cost compares with the crop classifier of the MCNN
 paper that motivated the project. In the course of the measurement an
 Advanced SIMD (NEON) kernel was added to the runtime, which made the
-deployed model 5.6 times faster; its design and verification are included.
+deployed model 6.2 times faster; its design and verification are included.
 The data split, the network, the quantisation and the accuracy figures are
 described in the companion report (\texttt{report/overview.pdf}) and are
 summarised here only as far as needed.
@@ -119,7 +115,7 @@ Model & Input & MACs & Parameters & Fold-0 mAP & Pooled mAP \\
 \midrule
 \cfg{small} (fallback) & $240 \times 160$ & 34.8 M & \num{42463} & 58.9 & 48.1 $\pm$ 1.1 (3) \\
 \cfg{small} (\textbf{deployed}) & $360 \times 240$ & 78.4 M & \num{42463} & 63.8 & 52.6 $\pm$ 1.9 (3) \\
-\cfg{small\_wide} & $360 \times 240$ & 203.5 M & \num{135359} & 68.1 & 56.4 $\pm$ 3.6 (2) \\
+\cfg{small\_wide} & $360 \times 240$ & 203.5 M & \num{135359} & 68.1 & 56.9 $\pm$ 2.7 (3) \\
 \cfg{wide} & $480 \times 320$ & 450.2 M & \num{172351} & 68.6 & 55.2 (1) \\
 \bottomrule
 \end{tabular}
@@ -301,22 +297,42 @@ a tolerance. This is confirmed by the golden test on all four models and by
 the full test-fold output, which is identical to the scalar output byte for
 byte.
 
-\paragraph{Selection.} The kernel is compiled when the target is AArch64 and
-is used for every layer whose number of output channels is a multiple of 16
-(all layers of all four models). Other targets, such as the laptop, compile
-the scalar code unchanged, and \texttt{-DSE\_NO\_NEON} forces the scalar
-path on the Pi for comparison. It adds about 80 lines to the runtime.
+\paragraph{Four pixels per pass.} In the kernel as described, the 16 weights
+for each $(t, i)$ are loaded from memory once per output pixel and used for
+four instructions. A second version computes four horizontally adjacent
+output pixels together: the same two weight registers are used against the
+inputs of all four pixels, so each weight load now serves 16
+multiply-accumulate instructions instead of four. This needs 16 accumulator
+registers (four pixels $\times$ 16 output channels), two weight registers and
+four input registers, which fits within the 32 vector registers of AArch64;
+the generated code was checked to keep everything in registers. The products
+and sums are the same as before, only grouped differently, so the argument
+for exactness is unchanged. Pixels left over at the end of a row, and layers
+whose input channel count is not a multiple of 8 (only the first layer, with
+one input channel), use the single-pixel kernel.
 
-\paragraph{Results.} Table~\ref{tab:neon} compares four builds of the
+\paragraph{Selection.} The NEON code is compiled when the target is AArch64
+and is used for every layer whose number of output channels is a multiple of
+16 (all layers of all four models). Other targets, such as the laptop,
+compile the scalar code unchanged. \texttt{-DSE\_NO\_NEON} forces the scalar
+path on the Pi and \texttt{-DSE\_NEON\_1PX} the single-pixel kernel, for
+comparison. Together the two kernels add about 150 lines to the runtime.
+
+\paragraph{Results.} Table~\ref{tab:neon} compares the builds of the
 deployed model. Letting the compiler vectorise for the specific processor
 (\texttt{-O3 -mcpu=cortex-a72}) gives a factor of 1.7; the hand-written
-kernel gives 5.6, and compiler flags add nothing further to it within the
-run-to-run spread. The default \texttt{-O2} build is therefore kept.
-Table~\ref{tab:neonall} gives the gain for all four models.
+single-pixel kernel gives 5.6, compiler flags add nothing further to it
+within the run-to-run spread, and the four-pixel kernel gives 6.2. The
+default \texttt{-O2} build with the four-pixel kernel is the deployed one.
+Table~\ref{tab:neonall} gives the gain for all four models. Every NEON
+build passes the golden test, and the full test-fold output of every
+four-pixel build is identical byte for byte to the scalar output.
 
 \begin{table}[h]
 \centering
-\caption{Deployed model (\cfg{small}, $360 \times 240$), Pi~4, one core.}
+\caption{Deployed model (\cfg{small}, $360 \times 240$), Pi~4, one core.
+The single-pixel kernel was measured in two separate builds (22.5 and
+22.1~ms); the first value is shown.}
 \label{tab:neon}
 \begin{tabular}{lrrr}
 \toprule
@@ -324,40 +340,43 @@ Build & ms / frame & GMAC/s & vs.\ scalar \texttt{-O2} \\
 \midrule
 scalar, \texttt{-O2} & 125.9 & 0.62 & 1.0 \\
 scalar, \texttt{-O3 -mcpu=cortex-a72} & 75.7 & 1.04 & 1.7 \\
-NEON, \texttt{-O2} & 22.5 & 3.48 & 5.6 \\
-NEON, \texttt{-O3 -mcpu=cortex-a72} & 21.5 & 3.65 & 5.9 \\
+NEON 1 pixel, \texttt{-O2} & 22.5 & 3.48 & 5.6 \\
+NEON 1 pixel, \texttt{-O3 -mcpu=cortex-a72} & 21.5 & 3.65 & 5.9 \\
+\textbf{NEON 4 pixels, \texttt{-O2}} & \textbf{20.3} & \textbf{3.85} & \textbf{6.2} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[h]
 \centering
-\caption{Pi 4, one core, \texttt{-O2}: scalar against NEON kernel.}
+\caption{Pi 4, one core, \texttt{-O2}, ms per frame. Speed-up, GMAC/s and
+frames per second refer to the four-pixel kernel.}
 \label{tab:neonall}
-\begin{tabular}{lrrrrr}
+\begin{tabular}{lrrrrrr}
 \toprule
-Model & Scalar ms & NEON ms & Speed-up & NEON GMAC/s & Frames/s \\
+Model & Scalar & NEON 1 px & NEON 4 px & Speed-up & GMAC/s & Frames/s \\
 \midrule
-\cfg{small} $240 \times 160$ & 56.0 & 10.2 & 5.5 & 3.41 & 98 \\
-\cfg{small} $360 \times 240$ & 125.9 & 22.5 & 5.6 & 3.48 & 44 \\
-\cfg{small\_wide} $360 \times 240$ & 300.1 & 77.6 & 3.9 & 2.62 & 12.9 \\
-\cfg{wide} $480 \times 320$ & 656.0 & \wneonlat & \wneonspeed & \wneongmac & 7.1 \\
+\cfg{small} $240 \times 160$ & 56.0 & 10.2 & 9.0 & 6.2 & 3.88 & 112 \\
+\cfg{small} $360 \times 240$ & 125.9 & 22.5 & 20.3 & 6.2 & 3.85 & 49 \\
+\cfg{small\_wide} $360 \times 240$ & 300.1 & 77.6 & 46.5 & 6.4 & 4.37 & 21.5 \\
+\cfg{wide} $480 \times 320$ & 656.0 & 140.9 & 91.8 & 7.1 & 4.91 & 10.9 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The 32-channel models reach about 3.5~GMAC/s, close to what the laptop
-achieves with scalar code. The two models with 64-channel layers gain less
-(3.9 and 4.7 times, 2.6 and 3.2~GMAC/s). A plausible contributor is that the
+With the single-pixel kernel the 32-channel models reach about
+3.5~GMAC/s, but the two models with 64-channel layers only 2.6 and 3.2. The
 16-bit weight table of a $64 \times 64$ layer is \SI{74}{KB} (against
 \SI{18}{KB} for $32 \times 32$), more than the \SI{32}{KB} level-1 data
-cache, so the weights are re-read from the level-2 cache for every output
-pixel. This does not explain the difference between \cfg{small\_wide} and
-\cfg{wide}, whose 64-channel layers are identical in shape, and cache misses
-were not measured; the cause of the lower efficiency is therefore open.
-Processing two or more output pixels per pass over the weights would halve
-the weight traffic and is the next optimisation to try for the wider
-models.
+cache, so in the single-pixel kernel those weights are re-read from the
+level-2 cache for every output pixel. The four-pixel kernel cuts that
+traffic by four, and the result supports this explanation: the 64-channel
+models gain the most from it (1.7 and 1.5 times, to 4.4 and 4.9~GMAC/s),
+while the 32-channel models, whose weights fit in the level-1 cache, gain
+only 11--13\%. With weight traffic reduced, the larger models now reach
+the higher GMAC/s.
+Cache misses were not measured directly, so this remains an inference from
+the timings, though now one with a confirmed prediction.
 
 Figure~\ref{fig:latency} summarises the latency of all builds against the
 compute of the model.
@@ -380,20 +399,21 @@ compute of the model.
 ]
 \addplot[s2, thick, mark=square*, mark size=2.6pt] coordinates {(34.8,56.0) (78.4,125.9) (203.5,300.1) (450.2,656.0)};
 \addlegendentry{Pi 4, scalar}
-\addplot[s1, thick, mark=*, mark size=2.8pt] coordinates {(34.8,10.2) (78.4,22.5) (203.5,77.6) (450.2,140.9)};
-\addlegendentry{Pi 4, NEON}
+\addplot[s1, thick, mark=*, mark size=2.8pt] coordinates {(34.8,9.0) (78.4,20.3) (203.5,46.5) (450.2,91.8)};
+\addlegendentry{Pi 4, NEON (4 pixels)}
 \addplot[s3, thick, dashed, mark=triangle*, mark size=3.2pt] coordinates {(34.8,9.0) (78.4,20.1) (203.5,27.6) (450.2,54.8)};
 \addlegendentry{laptop, scalar}
 \addplot[gray, densely dotted] coordinates {(25,100) (650,100)};
 \node[font=\scriptsize, text=inkmuted, anchor=south west] at (axis cs:27,100) {10 frames/s};
-\draw[inkmuted] (axis cs:74,25) -- (axis cs:62,40);
+\draw[inkmuted] (axis cs:74,24) -- (axis cs:62,40);
 \node[font=\scriptsize, anchor=south] at (axis cs:58,40) {deployed model};
 \end{loglogaxis}
 \end{tikzpicture}
 \caption{Latency against compute, one core, logarithmic axes. The four points
 of each line are the four models of Table~\ref{tab:models}. A line of slope 1
 means constant GMAC/s. The dotted line marks \SI{100}{ms}, i.e.\ 10 frames
-per second.}
+per second. The two leftmost Pi NEON points coincide almost exactly with the
+laptop's scalar points.}
 \label{fig:latency}
 \end{figure}
 
@@ -407,44 +427,50 @@ program running at once, and the temperature reached.
 \caption{Four copies in parallel, one per core. ``Per copy'' is the mean latency
 of each copy under this load (range over the four copies). Temperature at the end
 of the run. $^{*}$The firmware recorded that the soft temperature limit
-(\SI{80}{\celsius}) was reached during this run; see text. $^{\dagger}$Run
-directly after it; the firmware flag is cumulative, so whether this run was
-throttled cannot be told from it.}
+(\SI{80}{\celsius}) was reached during this run; see text. The firmware flag
+is cumulative until reboot, so it cannot tell whether later runs (the NEON
+rows of \cfg{wide} and all four-pixel rows) were throttled; their
+temperatures stayed below the limit.}
 \label{tab:throughput}
 \begin{tabular}{llrrrr}
 \toprule
 Model & Kernel & 1 core, ms & 4 cores, per copy, ms & Frames/s & End temp. \\
 \midrule
 \cfg{small} $240 \times 160$ & scalar & 56.0 & 56.4--56.6 & 70.6 & \SI{72.0}{\celsius} \\
-                              & NEON   & 10.2 & 10.7--11.8 & 339 & \SI{60.3}{\celsius} \\
+                              & NEON 1 px & 10.2 & 10.7--11.8 & 339 & \SI{60.3}{\celsius} \\
+                              & NEON 4 px & 9.0 & 9.3--9.4 & 425 & \SI{58.9}{\celsius} \\
 \cfg{small} $360 \times 240$ & scalar & 125.9 & 126.7--126.9 & 31.4 & \SI{68.6}{\celsius} \\
-                              & NEON   & 22.5 & 25.6--26.8 & 149 & \SI{65.7}{\celsius} \\
+                              & NEON 1 px & 22.5 & 25.6--26.8 & 149 & \SI{65.7}{\celsius} \\
+                              & NEON 4 px & 20.3 & 21.0--21.3 & 187 & \SI{64.2}{\celsius} \\
 \cfg{small\_wide} $360 \times 240$ & scalar & 300.1 & 302.6--303.8 & 13.2 & \SI{75.9}{\celsius} \\
-                              & NEON   & 77.6 & 161.5--163.8 & 24.4 & \SI{71.5}{\celsius} \\
+                              & NEON 1 px & 77.6 & 161.5--163.8 & 24.4 & \SI{71.5}{\celsius} \\
+                              & NEON 4 px & 46.5 & 59.1--59.5 & 67.1 & \SI{72.0}{\celsius} \\
 \cfg{wide} $480 \times 320$ & scalar & 656.0 & 663.2--664.8 & 6.0 & \SI{81.8}{\celsius}$^{*}$ \\
-                              & NEON   & \wneonlat & 252.7--261.3 & 15.3 & \SI{78.4}{\celsius}$^{\dagger}$ \\
+                              & NEON 1 px & 140.9 & 252.7--261.3 & 15.3 & \SI{78.4}{\celsius} \\
+                              & NEON 4 px & 91.8 & 100.5--101.5 & 39.4 & \SI{78.8}{\celsius} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 The scalar code scales perfectly to four cores: each copy is as fast as when
-alone. With NEON the 32-channel models lose 5--15\% per copy, so four cores
-still give 3.3--3.5 times the single-core rate (149 frames per second for the
-deployed model). The 64-channel models lose about half their speed per copy:
-four copies together are only 1.9 (\cfg{small\_wide}) and 2.2 (\cfg{wide})
-times as fast as one. A likely reason is
-contention for the \SI{1}{MB} level-2 cache, which the four cores share and
-which four copies' working sets (weights and activation buffers) exceed
-together; as above, this is an inference from the timings.
+alone. With the single-pixel NEON kernel the 32-channel models lost 5--15\%
+per copy and the 64-channel models about half, so that four copies of
+\cfg{small\_wide} were only 1.9 times as fast as one. This is the same weight
+traffic as above, now competing for the \SI{1}{MB} level-2 cache and the
+memory bus shared by the four cores. The four-pixel kernel largely removes
+it: per-copy slowdown is 3--5\% for the 32-channel models and 10--28\% for the
+64-channel ones, and four cores give 3.8 times the single-core rate for
+the 32-channel models (187 frames per second for the deployed model) and
+3.1--3.6 times for the 64-channel models.
 
 Without a fan, every run of the three smaller models stayed at or below
-\SI{76}{\celsius} and no throttling was recorded. The four-copy scalar run
-of \cfg{wide}, the longest run at full load (about two minutes), reached
-\SI{81.8}{\celsius}, and the firmware recorded that the soft temperature
-limit had been reached, at which the BCM2711 begins to lower its clock. The
-effect on that run was small (664 against 656~ms per frame), but it shows
-that sustained four-core operation needs a heat sink or fan; the deployed
-model at four cores ran at \SI{66}{\celsius}.
+\SI{76}{\celsius}. The four-copy scalar run of \cfg{wide}, the longest run
+at full load (about two minutes), reached \SI{81.8}{\celsius}, and the
+firmware recorded that the soft temperature limit had been reached, at which
+the BCM2711 begins to lower its clock. The effect on that run was small (664
+against 656~ms per frame), but it shows that sustained four-core operation
+of the heavier models needs a heat sink or fan; the deployed model at four
+cores ran at \SI{64}{\celsius}.
 
 \subsection{Memory and program size}
 
@@ -488,12 +514,12 @@ pass of 78.4~M multiply-accumulates, about one sixth of MCNN's
 classification cost, with 66 times fewer parameters (\num{42463} against 2.8~M).
 The paper's claim that MCNN is suited to embedded use was not supported by a
 measurement; the figures above give the comparison in operation counts, and
-the deployed detector's measured latency on the Pi is 22.5~ms per frame.
+the deployed detector's measured latency on the Pi is 20.3~ms per frame.
 
 \section{Discussion}
 
 \paragraph{The deployed model is fast enough.} With the NEON kernel the
-deployed model processes a frame in 22.5~ms on one core, 44 frames per
+deployed model processes a frame in 20.3~ms on one core, 49 frames per
 second. Forward-looking imaging sonars of the class that recorded the
 dataset typically deliver on the order of 10--15 frames per second, so one
 core keeps up with the sensor with a factor of three or more to spare, and
@@ -501,13 +527,17 @@ the other three cores remain free for the rest of the system. The
 $240 \times 160$ fallback is no longer needed for speed.
 
 \paragraph{The accuracy reference becomes a candidate.} \cfg{small\_wide} at
-$360 \times 240$ is the most accurate configuration found (56.4 against 52.6
-pooled mAP, with a seed spread that is still wide, Table~\ref{tab:models}).
-It had been ruled out on cost. On the Pi it now runs at 77.6~ms per frame,
-12.9 frames per second on one core, which is within the sensor rate quoted
+$360 \times 240$ is the most accurate configuration found (56.9 against 52.6
+pooled mAP over three seeds each, ahead in every seed pairing and every fold,
+Table~\ref{tab:models}). A 48-channel variant in between (132~M MACs) gave
+no measurable gain at one seed (50.9), so there is no cheaper intermediate
+model to choose instead.
+It had been ruled out on cost. On the Pi it now runs at 46.5~ms per frame,
+21.5 frames per second on one core, which is above the sensor rate quoted
 above. Whether to deploy it is a trade-off between about four points of mAP
-and a factor of 3.4 in compute and energy; the choice depends on the power
-budget of the vehicle, which the energy measurement would settle.
+and a factor of 2.6 in compute (2.3 in measured time, and presumably in
+energy); the choice depends on the power budget of the vehicle, which the
+energy measurement would settle.
 
 \paragraph{Design choices confirmed.} The decision to write the runtime in
 plain C with integer arithmetic and no library is what makes the
@@ -515,8 +545,10 @@ equivalence result possible: the program on the Pi is verifiably the same
 function as the one evaluated in Python, so no accuracy is lost or needs to
 be re-measured in deployment. The decision to defer vector code until the
 target was measured is also borne out: the scalar Pi measurement showed that
-the compiler alone recovers only a factor of 1.7, and the hand-written kernel
-was then targeted at the specific instruction set of the Pi~4.
+the compiler alone recovers only a factor of 1.7, the hand-written kernel
+was then targeted at the specific instruction set of the Pi~4, and the
+measured weakness of its first version on the 64-channel layers pointed
+directly to the four-pixel variant.
 
 \section{Limitations}
 
@@ -530,9 +562,9 @@ was then targeted at the specific instruction set of the Pi~4.
   \item Latency excludes the acquisition of the frame and its conversion to
   the $8$-bit Cartesian image the network expects; on a vehicle this is done
   by the sonar's software and its cost depends on the sensor interface.
-  \item The lower NEON efficiency of the 64-channel models, and their poor
-  scaling to four cores, are not explained; the cache explanation offered is
-  an inference from the timings, not a measurement of cache misses.
+  \item The cache explanation for the behaviour of the 64-channel layers is
+  supported by the effect of the four-pixel kernel but was not confirmed by
+  counting cache misses.
   \item Only a Pi~4 was measured. On a Pi~5 (Cortex-A76, \SI{2.4}{GHz},
   8-bit dot-product instructions) a dedicated kernel using \texttt{udot}
   would be expected to be several times faster again; this has not been
@@ -548,19 +580,20 @@ was then targeted at the specific instruction set of the Pi~4.
   byte, to the laptop and bit for bit to the Python integer reference. The
   accuracy of the deployed model (52.6\% pooled mAP, 63.8\% on test fold 0)
   therefore holds on the device without re-measurement.
-  \item A NEON kernel for the Pi~4's Cortex-A72, exact by construction, makes
-  the deployed model 5.6 times faster: 22.5~ms per frame (44 frames per
-  second) on one core, against 126~ms for the original scalar code and 76~ms
-  for the best the compiler achieves alone.
-  \item Four cores process 149 frames per second of the deployed model at
-  \SI{66}{\celsius} without a fan; only the heaviest model at full load
+  \item A NEON kernel for the Pi~4's Cortex-A72, exact by construction and
+  computing four output pixels per pass over the weights, makes the deployed
+  model 6.2 times faster: 20.3~ms per frame (49 frames per second) on one
+  core, against 126~ms for the original scalar code and 76~ms for the best
+  the compiler achieves alone.
+  \item Four cores process 187 frames per second of the deployed model at
+  \SI{64}{\celsius} without a fan; only the heaviest model at full load
   reached the soft temperature limit. The process needs 2.3~MB of memory and a 54~KB
   program file.
   \item The most accurate model, \cfg{small\_wide} at $360 \times 240$, runs
-  at 12.9 frames per second on one core and is now a deployment candidate.
+  at 21.5 frames per second on one core (46.5~ms) and is now a deployment
+  candidate.
   \item Open: energy per frame with an external meter; a sustained thermal
-  test; a two-pixel variant of the kernel for the 64-channel models; a Pi~5
-  kernel using the dot-product instructions.
+  test; a Pi~5 kernel using the dot-product instructions.
 \end{itemize}
 
 \end{document}

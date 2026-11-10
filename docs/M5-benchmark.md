@@ -93,6 +93,28 @@ to classify the annotated objects of a frame, with no localisation. The deployed
 detector: 78.4 M MACs for detection and classification of the whole frame, 42,463
 parameters.
 
+### 3.6 Four-pixel NEON kernel (added the same day)
+
+`neon_block4`: 4 horizontally adjacent output pixels per pass, so each pair of
+weight vectors loaded serves 16 `vmlal` instead of 4 (16 accumulators + 2 weight
++ 4 input registers, no spills in the generated code). Used when cin % 8 == 0
+(all layers but the first); row tails and layer 0 use the 1-pixel path.
+`-DSE_NEON_1PX` builds the 1-pixel kernel only. Golden test passes and the full
+test-fold output is byte-identical to scalar for all four models.
+
+| Model | NEON 1 px ms | NEON 4 px ms (GMAC/s) | vs scalar | 4 cores, per copy ms | 4 cores fps | End temp |
+|---|---|---|---|---|---|---|
+| small 240x160 | 10.2 (rebuild 10.4) | 9.0 (3.88) | 6.2x | 9.3-9.4 | 425 | 58.9 C |
+| **small 360x240** | 22.5 (rebuild 22.1) | **20.3 (3.85)** | 6.2x | 21.0-21.3 | **187** | 64.2 C |
+| small_wide 360x240 | 77.6 (rebuild 77.1) | 46.5 (4.37) | 6.4x | 59.1-59.5 | 67.1 | 72.0 C |
+| wide 480x320 | 140.9 (rebuild 141.9) | 91.8 (4.91) | 7.1x | 100.5-101.5 | 39.4 | 78.8 C |
+
+The 64-channel models gain most (1.7x / 1.5x) and now scale to 4 cores at
+3.1-3.6x (was 1.9-2.2x); 32-channel models gain 11-13%. This is the prediction
+of the weight-traffic explanation in section 4, so it is now supported (still no
+cache-miss counts). The thermal flag was already set from the wide scalar run, so
+whether 4-pixel 4-core runs throttled cannot be told from it; all stayed < 80 C.
+
 ## 4. NEON kernel (runtime/sonar_edge.c, `conv3x3_neon`)
 
 Vectorised over output channels: per output pixel, block of 16 output channels
@@ -108,19 +130,20 @@ construction. Used on AArch64 for layers with cout % 16 == 0 (all layers here);
 compile the scalar path unchanged. No dot-product instructions, so it runs on
 the Pi 4.
 
-64-channel models gain less (small_wide 3.9x, wide 4.7x vs 5.6x) and small_wide
-scales poorly to 4 cores. Candidate cause: the int16 weight table of a 64x64 layer
+With the 1-pixel kernel, 64-channel models gained less (small_wide 3.9x, wide
+4.7x vs 5.6x) and scaled poorly to 4 cores. Cause: the int16 weight table of a 64x64 layer
 is 74 KB > 32 KB L1D, so it streams from L2 per output pixel, and four copies'
 working sets exceed the 1 MB shared L2. This does not explain small_wide vs wide
-(identical 64x64 layers), and cache misses were not measured: open. Lever:
-process 2-4 output pixels per weight pass.
+(identical 64x64 layers), and cache misses were not measured. The lever,
+processing 4 output pixels per weight pass, was then implemented (section 3.6)
+and gave exactly the predicted pattern.
 
 ## 5. Conclusions
 
-- Deployed model on a Pi 4: 22.5 ms / frame, 44 fps on one core, 149 fps on four,
-  2.3 MB RSS; output bit-exact, so the CV accuracy holds on device. The
+- Deployed model on a Pi 4: 20.3 ms / frame, 49 fps on one core, 187 fps on four
+  (4-pixel kernel), 2.3 MB RSS; output bit-exact, so the CV accuracy holds on device. The
   240x160 fallback is not needed.
-- small_wide@360 (best accuracy, 56.4 pooled) at 77.6 ms / 12.9 fps single core
+- small_wide@360 (best accuracy, 56.9 +- 2.7 pooled over 3 seeds) at 46.5 ms / 21.5 fps single core
   is now a deployment candidate.
 - Open: energy (external USB-C meter or INA219), sustained thermal test,
-  multi-pixel kernel for 64-channel layers, Pi 5 `udot` kernel.
+  Pi 5 `udot` kernel.
