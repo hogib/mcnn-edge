@@ -34,6 +34,7 @@ def write_weights(model, in_h, in_w, out: Path):
     parts.append(f"#define SE_N_CLASSES {model['n_classes']}")
     parts.append(f"#define SE_STRIDE {model['stride']}")
     parts.append(f"#define SE_N_LAYERS {len(L)}")
+    parts.append(f"#define SE_W_ELEMS {sum(len(l['w']) for l in L)}  /* total 3x3 weights (NEON transposed copy) */")
     parts.append(f"#define SE_HEAD_COUT {model['head']['cout']}")
     parts.append(f"#define SE_HEAD_CIN {model['head']['cin']}")
     seg = model["head"]["cout"] - model["n_classes"] - 4  # segmentation channels (background + classes) * up^2, or 0

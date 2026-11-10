@@ -7,6 +7,7 @@
 #define SE_N_CLASSES 11
 #define SE_STRIDE 8
 #define SE_N_LAYERS 6
+#define SE_W_ELEMS 41616  /* total 3x3 weights (NEON transposed copy) */
 #define SE_HEAD_COUT 15
 #define SE_HEAD_CIN 32
 #define SE_SEG_COUT 0

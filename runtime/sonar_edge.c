@@ -14,6 +14,15 @@
 
 #include "weights.h"
 
+/* NEON path on AArch64 unless built with -DSE_NO_NEON (scalar reference).
+ * Needs SE_W_ELEMS, which headers exported before the NEON kernel lack. */
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(SE_W_ELEMS) && !defined(SE_NO_NEON)
+#define SE_USE_NEON 1
+#include <arm_neon.h>
+#else
+#define SE_USE_NEON 0
+#endif
+
 static uint8_t act_a[SE_ACT_ELEMS];
 static uint8_t act_b[SE_ACT_ELEMS];
 static int32_t head_out[SE_OUT_H * SE_OUT_W * SE_HEAD_COUT];
@@ -75,10 +84,99 @@ static void conv3x3(const uint8_t *in, int h, int w, const se_layer_t *L, uint8_
     *ow = wo;
 }
 
+#if SE_USE_NEON
+/* NEON kernel (AArch64 Advanced SIMD, no dot-product extension needed, so it
+ * runs on the Pi 4's Cortex-A72). Vectorised over output channels: for each
+ * output pixel, tap and input channel, the input value (u8 widened to s16) is
+ * broadcast against 16 int16 weights and accumulated into four int32x4 with
+ * vmlal_laneq_s16. Every product fits s16 x s16 -> s32 exactly and integer
+ * addition is associative, so the result is bit-identical to conv3x3().
+ * Weights are transposed once to [tap][ci][co] int16 (static buffer). */
+static int16_t wt16[SE_W_ELEMS];
+static const int16_t *layer_wt[SE_N_LAYERS];
+
+static void prepare_neon_weights(void)
+{
+    size_t off = 0;
+    for (int i = 0; i < SE_N_LAYERS; i++) {
+        const se_layer_t *L = &se_layers[i];
+        int16_t *dst = wt16 + off;
+        for (int co = 0; co < L->cout; co++)
+            for (int t = 0; t < 9; t++)
+                for (int ci = 0; ci < L->cin; ci++)
+                    dst[((size_t)t * L->cin + ci) * L->cout + co] = L->w[((size_t)co * 9 + t) * L->cin + ci];
+        layer_wt[i] = dst;
+        off += (size_t)9 * L->cin * L->cout;
+    }
+}
+
+#define MLA16(lane)                                                             \
+    do {                                                                        \
+        const int16_t *wq = wk + (size_t)(ci + (lane)) * cout;                 \
+        const int16x8_t w0 = vld1q_s16(wq), w1 = vld1q_s16(wq + 8);            \
+        a0 = vmlal_laneq_s16(a0, vget_low_s16(w0), x, lane);                   \
+        a1 = vmlal_high_laneq_s16(a1, w0, x, lane);                            \
+        a2 = vmlal_laneq_s16(a2, vget_low_s16(w1), x, lane);                   \
+        a3 = vmlal_high_laneq_s16(a3, w1, x, lane);                            \
+    } while (0)
+
+static void conv3x3_neon(const uint8_t *in, int h, int w, const se_layer_t *L, const int16_t *wt,
+                         uint8_t *out, int pad_out, int *oh, int *ow)
+{
+    const int cin = L->cin, cout = L->cout, s = L->stride, d = L->dilation;
+    const int wp = w + 2 * d;
+    const int ho = (h - 1) / s + 1, wo = (w - 1) / s + 1;
+    const int wop = wo + 2 * pad_out;
+    const int cin8 = cin & ~7;
+    int32_t acc[16];
+
+    for (int oy = 0; oy < ho; oy++) {
+        for (int ox = 0; ox < wo; ox++) {
+            uint8_t *op = out + ((size_t)(oy + pad_out) * wop + (ox + pad_out)) * cout;
+            for (int cb = 0; cb < cout; cb += 16) {
+                int32x4_t a0 = vld1q_s32(L->bias + cb), a1 = vld1q_s32(L->bias + cb + 4);
+                int32x4_t a2 = vld1q_s32(L->bias + cb + 8), a3 = vld1q_s32(L->bias + cb + 12);
+                for (int ky = 0; ky < 3; ky++) {
+                    const int iy = oy * s + ky * d;
+                    for (int kx = 0; kx < 3; kx++) {
+                        const uint8_t *ip = in + ((size_t)iy * wp + ox * s + kx * d) * cin;
+                        const int16_t *wk = wt + (size_t)(ky * 3 + kx) * cin * cout + cb;
+                        int ci = 0;
+                        for (; ci < cin8; ci += 8) {
+                            const int16x8_t x = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(ip + ci)));
+                            MLA16(0); MLA16(1); MLA16(2); MLA16(3);
+                            MLA16(4); MLA16(5); MLA16(6); MLA16(7);
+                        }
+                        for (; ci < cin; ci++) {
+                            const int16_t xv = ip[ci];
+                            const int16_t *wq = wk + (size_t)ci * cout;
+                            const int16x8_t w0 = vld1q_s16(wq), w1 = vld1q_s16(wq + 8);
+                            a0 = vmlal_n_s16(a0, vget_low_s16(w0), xv);
+                            a1 = vmlal_high_n_s16(a1, w0, xv);
+                            a2 = vmlal_n_s16(a2, vget_low_s16(w1), xv);
+                            a3 = vmlal_high_n_s16(a3, w1, xv);
+                        }
+                    }
+                }
+                vst1q_s32(acc, a0); vst1q_s32(acc + 4, a1); vst1q_s32(acc + 8, a2); vst1q_s32(acc + 12, a3);
+                for (int k = 0; k < 16; k++) op[cb + k] = requant(acc[k], L->mult[cb + k], L->shift[cb + k]);
+            }
+        }
+    }
+    *oh = ho;
+    *ow = wo;
+}
+#undef MLA16
+#endif
+
 const int32_t *se_forward(const uint8_t *frame)
 {
     uint8_t *in = act_a, *out = act_b;
     int h = SE_IN_H, w = SE_IN_W;
+#if SE_USE_NEON
+    static int prepared = 0;
+    if (!prepared) { prepare_neon_weights(); prepared = 1; }
+#endif
 
     /* input frame -> padded buffer for layer 0 (cin = 1) */
     {
@@ -91,7 +189,12 @@ const int32_t *se_forward(const uint8_t *frame)
         const int pad_out = i + 1 < SE_N_LAYERS ? se_layers[i + 1].dilation : 0;
         int oh, ow;
         memset(out, 0, sizeof(act_a));
-        conv3x3(in, h, w, &se_layers[i], out, pad_out, &oh, &ow);
+#if SE_USE_NEON
+        if (se_layers[i].cout % 16 == 0)
+            conv3x3_neon(in, h, w, &se_layers[i], layer_wt[i], out, pad_out, &oh, &ow);
+        else
+#endif
+            conv3x3(in, h, w, &se_layers[i], out, pad_out, &oh, &ow);
         h = oh;
         w = ow;
         uint8_t *t = in; in = out; out = t;
