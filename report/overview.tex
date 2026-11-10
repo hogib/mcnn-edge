@@ -777,8 +777,12 @@ the frame rate, giving joules per frame, plus the idle baseline of the board.
 Expected values from the laptop measurement are 70--100~ms per frame for the
 deployed model and 35--50~ms for the $240 \times 160$ fallback on a Pi~4;
 these are estimates until measured, and the fallback is kept in case the
-deployed model's latency is too high for the application. The hardware was not available at the time of
-writing.
+deployed model's latency is too high for the application. \emph{Update,
+10 November:} measured on a Raspberry Pi~4. The output is byte-identical to the
+laptop's; with a NEON kernel added to the runtime the deployed model takes
+22.5~ms per frame on one core (126~ms scalar) and four cores process 149
+frames per second. Energy was not measured. Details in the separate report
+\texttt{report/deployment.pdf}.
 
 \paragraph{Segmentation.} Section~\ref{sec:segres} gives the first
 result; the C decoder emits the label map and the quantised model's mIoU
