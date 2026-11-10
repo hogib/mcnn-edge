@@ -120,6 +120,74 @@ static void prepare_neon_weights(void)
         a3 = vmlal_high_laneq_s16(a3, w1, x, lane);                            \
     } while (0)
 
+/* Four adjacent output pixels (ox .. ox+3) of one row at once, for layers with
+ * cin % 8 == 0: each pair of weight vectors loaded is used for 4 pixels, so
+ * weight traffic per MAC drops 4x. 16 accumulators + 2 weight + 4 input
+ * registers fit the 32 NEON registers. Same products and sums as the
+ * single-pixel path, so the same result. */
+#ifndef SE_NEON_1PX  /* -DSE_NEON_1PX: single-pixel kernel only, for comparison */
+#define MLA4(acc0, acc1, acc2, acc3, xv, lane)                                  \
+    do {                                                                        \
+        acc0 = vmlal_laneq_s16(acc0, w0l, xv, lane);                            \
+        acc1 = vmlal_high_laneq_s16(acc1, w0, xv, lane);                        \
+        acc2 = vmlal_laneq_s16(acc2, w1l, xv, lane);                            \
+        acc3 = vmlal_high_laneq_s16(acc3, w1, xv, lane);                        \
+    } while (0)
+#define LANE4(lane)                                                             \
+    do {                                                                        \
+        const int16_t *wq = wk + (size_t)(ci + (lane)) * cout;                 \
+        const int16x8_t w0 = vld1q_s16(wq), w1 = vld1q_s16(wq + 8);            \
+        const int16x4_t w0l = vget_low_s16(w0), w1l = vget_low_s16(w1);        \
+        MLA4(p0a0, p0a1, p0a2, p0a3, x0, lane);                                 \
+        MLA4(p1a0, p1a1, p1a2, p1a3, x1, lane);                                 \
+        MLA4(p2a0, p2a1, p2a2, p2a3, x2, lane);                                 \
+        MLA4(p3a0, p3a1, p3a2, p3a3, x3, lane);                                 \
+    } while (0)
+#define LOADX(p) vreinterpretq_s16_u16(vmovl_u8(vld1_u8(ip + (size_t)(p) * s * cin + ci)))
+#define STORE4(p, a0_, a1_, a2_, a3_)                                           \
+    do {                                                                        \
+        vst1q_s32(acc, a0_); vst1q_s32(acc + 4, a1_);                           \
+        vst1q_s32(acc + 8, a2_); vst1q_s32(acc + 12, a3_);                      \
+        uint8_t *o = op + (size_t)(p) * cout + cb;                              \
+        for (int k = 0; k < 16; k++) o[k] = requant(acc[k], L->mult[cb + k], L->shift[cb + k]); \
+    } while (0)
+
+static void neon_block4(const uint8_t *in, int wp, const se_layer_t *L, const int16_t *wt,
+                        int oy, int ox, uint8_t *op)
+{
+    const int cin = L->cin, cout = L->cout, s = L->stride, d = L->dilation;
+    int32_t acc[16];
+    for (int cb = 0; cb < cout; cb += 16) {
+        const int32x4_t b0 = vld1q_s32(L->bias + cb), b1 = vld1q_s32(L->bias + cb + 4);
+        const int32x4_t b2 = vld1q_s32(L->bias + cb + 8), b3 = vld1q_s32(L->bias + cb + 12);
+        int32x4_t p0a0 = b0, p0a1 = b1, p0a2 = b2, p0a3 = b3;
+        int32x4_t p1a0 = b0, p1a1 = b1, p1a2 = b2, p1a3 = b3;
+        int32x4_t p2a0 = b0, p2a1 = b1, p2a2 = b2, p2a3 = b3;
+        int32x4_t p3a0 = b0, p3a1 = b1, p3a2 = b2, p3a3 = b3;
+        for (int ky = 0; ky < 3; ky++) {
+            const int iy = oy * s + ky * d;
+            for (int kx = 0; kx < 3; kx++) {
+                const uint8_t *ip = in + ((size_t)iy * wp + ox * s + kx * d) * cin;
+                const int16_t *wk = wt + (size_t)(ky * 3 + kx) * cin * cout + cb;
+                for (int ci = 0; ci < cin; ci += 8) {
+                    const int16x8_t x0 = LOADX(0), x1 = LOADX(1), x2 = LOADX(2), x3 = LOADX(3);
+                    LANE4(0); LANE4(1); LANE4(2); LANE4(3);
+                    LANE4(4); LANE4(5); LANE4(6); LANE4(7);
+                }
+            }
+        }
+        STORE4(0, p0a0, p0a1, p0a2, p0a3);
+        STORE4(1, p1a0, p1a1, p1a2, p1a3);
+        STORE4(2, p2a0, p2a1, p2a2, p2a3);
+        STORE4(3, p3a0, p3a1, p3a2, p3a3);
+    }
+}
+#undef MLA4
+#undef LANE4
+#undef LOADX
+#undef STORE4
+#endif /* SE_NEON_1PX */
+
 static void conv3x3_neon(const uint8_t *in, int h, int w, const se_layer_t *L, const int16_t *wt,
                          uint8_t *out, int pad_out, int *oh, int *ow)
 {
@@ -133,6 +201,13 @@ static void conv3x3_neon(const uint8_t *in, int h, int w, const se_layer_t *L, c
     for (int oy = 0; oy < ho; oy++) {
         for (int ox = 0; ox < wo; ox++) {
             uint8_t *op = out + ((size_t)(oy + pad_out) * wop + (ox + pad_out)) * cout;
+#ifndef SE_NEON_1PX
+            if (cin8 == cin && ox + 4 <= wo) {   /* 4-pixel block, then skip the 3 extra pixels */
+                neon_block4(in, wp, L, wt, oy, ox, op);
+                ox += 3;
+                continue;
+            }
+#endif
             for (int cb = 0; cb < cout; cb += 16) {
                 int32x4_t a0 = vld1q_s32(L->bias + cb), a1 = vld1q_s32(L->bias + cb + 4);
                 int32x4_t a2 = vld1q_s32(L->bias + cb + 8), a3 = vld1q_s32(L->bias + cb + 12);
