@@ -501,44 +501,79 @@ seed 0) closes that gap:
 | small, 360x240 (3 seeds, shipped) | 78 M | 52.6 +- 1.9 | 52.3 | 61.0, 65.1, 52.2, 48.2, 67.5 (means) |
 | small_wide, 360x240, seed 0 | 204 M | 59.0 | 58.8 | 70.4, 72.2, 59.2, 55.5, 71.3 |
 | small_wide, 360x240, seed 1 | 204 M | 53.9 | 53.7 | 64.4, 65.6, 57.4, 52.0, 67.8 |
-| **small_wide, 360x240, mean (s.d.)** | 204 M | **56.4 (3.6)** | **56.3 (3.6)** | 67.4, 68.9, 58.3, 53.8, 69.5 (means) |
+| small_wide, 360x240, seed 2 (added 2026-11-10) | 204 M | 57.8 | 57.6 | 68.2, 66.1, 57.7, 48.3, 73.6 |
+| **small_wide, 360x240, mean of 3 (s.d.)** | 204 M | **56.9 (2.7)** | **56.7 (2.6)** | 67.7, 68.0, 58.1, 52.0, 70.9 (means) |
 | wide, 480x320 | 450 M | 55.2 | 56.2 | 66.9, 68.6, 55.7, 52.1, 70.5 |
 
-Best epochs 72, 114, 113, 77, 63 (seed 0) and 87, 109, 111, 104, 67 (seed
-1). Per class (pooled float, seed 0 / seed 1): bottle 86.6 / 76.6, can 19.6
-/ 14.9, chain 34.1 / 30.4, drink-carton 85.6 / 83.9, hook 95.3 / 90.5,
-propeller 50.8 / 53.3, shampoo-bottle 36.6 / 33.9, standing-bottle 39.6 /
-13.6, tire 91.9 / 95.6, valve 25.4 / 18.1, wall 83.2 / 82.2.
+Best epochs 72, 114, 113, 77, 63 (seed 0), 87, 109, 111, 104, 67 (seed
+1) and 129, 114, 67, 117, 102 (seed 2). Per class (pooled float, seed 0 /
+seed 1 / seed 2): bottle 86.6 / 76.6 / 88.1, can 19.6 / 14.9 / 18.0, chain
+34.1 / 30.4 / 35.7, drink-carton 85.6 / 83.9 / 82.5, hook 95.3 / 90.5 / 96.5,
+propeller 50.8 / 53.3 / 48.7, shampoo-bottle 36.6 / 33.9 / 34.0,
+standing-bottle 39.6 / 13.6 / 17.7, tire 91.9 / 95.6 / 94.6, valve 25.4 /
+18.1 / 34.5, wall 83.2 / 82.2 / 85.4.
 
 **Discussion.**
 
-1. **Width and resolution interact, by about +4 points with a wide
-   margin.** At 240x160 the extra channels buy +0.8 (noise); at 360x240
-   they buy +3.8 over the three-seed mean of `small` on the two-seed mean,
-   and every fold mean is up (by 0.3 to 6.6). The two seeds differ by 5.1
-   pooled points (59.0 and 53.9), twice the spread seen for `small`, so the
-   gain is established in sign but not in size: seed 0 is above every
-   `small` seed on every fold, seed 1 (53.9) falls inside the `small` seed
-   range (51.0-54.6) although it is above every `small` fold mean. The
+1. **Width and resolution interact, by about +4 points.** At 240x160 the
+   extra channels buy +0.8 (noise); at 360x240 they buy +4.3 on three-seed
+   means (56.9 +- 2.7 against 52.6 +- 1.9), every fold mean is up (by 2.9
+   to 6.7), and each seed beats the `small` run of the same seed (+4.4,
+   +1.7, +6.8). The third seed (57.8, run 2026-11-10) landed between the
+   first two, so the two-seed estimate (56.4 +- 3.6) was not inflated by
+   the seed-0 run; the spread is still 1.4x that of `small`, and seed 1
+   (53.9) remains inside the `small` seed range (51.0-54.6). The
    conclusion of Section 6.3 holds as stated, width *without* resolution
    does not help; the sentence in Section 6.4, item 4, that the last point
    of `wide` "is what its doubled channels buy at full resolution" is
-   superseded, since the same channels at 360x240 give 56.4 +- 3.6 against
+   superseded, since the same channels at 360x240 give 56.9 +- 2.7 against
    55.2 for `wide` at 480x320 (one seed) at 45% of its compute, i.e. at
    least as much.
 2. **The seed spread is in the pooled-AP-sensitive classes.** Between the
    two seeds, standing-bottle moves from 39.6 to 13.6, bottle from 86.6 to
    76.6 and valve from 25.4 to 18.1; drink-carton (85.6 / 83.9, from 63.1
    for `small`), tire (91.9 / 95.6, from 89.3) and hook (95.3 / 90.5) are
-   the stable gains. The seed-0 run was at the top of its spread, as the
-   seed-0 runs of Section 6.5 were.
-3. **It is not a deployment candidate as it stands.** 204 M MACs is 2.6x
-   the shipped model and twice the plan's budget: about 52 ms per frame on
-   the laptop by the M3 throughput, 180-260 ms on a Pi 4. With two seeds
+   the stable gains. Seed 2 has standing-bottle at 17.7, close to seed 1,
+   so the 39.6 of seed 0 is the outlier; valve (34.5) is the class that
+   moves most in seed 2.
+3. **Deployment.** 204 M MACs is 2.6x the shipped model and twice the
+   plan's budget. Written when the Pi latency was estimated at 180-260 ms;
+   measured in M5 (2026-11-10) at 300 ms scalar and 46.5 ms with the
+   4-pixel NEON kernel (21.5 fps on one Pi 4 core), which makes it a
+   deployment candidate after all (docs/M5-benchmark.md). With three seeds
    it is at least the equal of `wide` as the accuracy reference at under
-   half the cost. A 48-channel stack at 360x240 (about 140 M MACs) is the
-   obvious interpolation if the budget can stretch; it has not been run. A
-   third seed would tighten the +-3.6.
+   half the cost. The 48-channel interpolation is Section 6.7.
+
+### 6.7 A 48-channel stack at 360x240
+
+`small48` (added 2026-11-10): `small_wide` with 48 instead of 64 channels in
+layers 3-6, (16,2,1) (32,2,1) (48,2,1) (48,1,1) (48,1,2) (48,1,4); 82 k
+parameters, 131.6 M MACs at 360x240 (1.7x `small`, 0.65x `small_wide`). 48
+is a multiple of 16, so the NEON kernel applies. Same protocol, seed 0
+(`runs/small48_360_cv`); best epochs 103, 125, 89, 70, 55.
+
+| Configuration | MACs | Pooled float | Pooled int8 | Per fold (float) |
+|---|---|---|---|---|
+| small, 360x240 (3 seeds) | 78 M | 52.6 +- 1.9 | 52.3 | 61.0, 65.1, 52.2, 48.2, 67.5 (means) |
+| small48, 360x240, seed 0 | 132 M | 50.9 | 50.5 | 62.6, 68.9, 53.6, 42.1, 61.3 |
+| small_wide, 360x240 (3 seeds) | 204 M | 56.9 +- 2.7 | 56.7 | 67.7, 68.0, 58.1, 52.0, 70.9 (means) |
+
+Per class (pooled float): bottle 77.6, can 14.4, chain 26.9, drink-carton
+70.4, hook 84.8, propeller 47.5, shampoo-bottle 35.2, standing-bottle 2.3,
+tire 93.7, valve 23.9, wall 83.0.
+
+**Discussion.** One seed, 50.9, is inside the `small` seed range (51.0-54.6
+is the range of its three seeds; 50.9 is 0.9 s.d. below their mean) and
+well below every `small_wide` seed. Per fold it is above the `small` mean on
+folds 0-2 and below on folds 3-4 (fold 4 by 6 points). Standing-bottle
+(2.3) is low, but `small` is low there too (3.7-9.4), so it accounts for at
+most about 0.6 pooled points of the difference. So the
+interpolation does not show a proportional gain: at one seed it is
+indistinguishable from `small`, and the width gain of Section 6.6 appears
+only at 64 channels. A single seed cannot separate "no gain" from "a gain
+of 1-2 points hidden by seed noise"; given the cost (1.7x the shipped model
+for no measurable gain) further seeds are not a priority. If an intermediate
+model is wanted on the Pi, `small_wide` itself is now affordable (M5).
 
 ### 6.5 Seed repeats under the full protocol
 

@@ -24,6 +24,8 @@ CONFIGS = {
     "small": [(16, 2, 1), (32, 2, 1), (32, 2, 1), (32, 1, 1), (32, 1, 2), (32, 1, 4)],
     # small's half-res layout with wide's channel widths: separates the effect of width from resolution
     "small_wide": [(16, 2, 1), (32, 2, 1), (64, 2, 1), (64, 1, 1), (64, 1, 2), (64, 1, 4)],
+    # between small and small_wide: 48 channels (a multiple of 16, so the NEON kernel applies)
+    "small48": [(16, 2, 1), (32, 2, 1), (48, 2, 1), (48, 1, 1), (48, 1, 2), (48, 1, 4)],
 }
 
 
