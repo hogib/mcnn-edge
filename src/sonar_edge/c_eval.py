@@ -2,6 +2,11 @@
 as the Python models. The C mAP must equal the Python int8 mAP.
 
   uv run python -m sonar_edge.c_eval runs/<name> [--split test] [--bin runtime/sonar-detect] [--repeat N]
+  uv run python -m sonar_edge.c_eval runs/<name> --pred dets.txt [--tag pi4]
+
+With --pred, the detections are read from a file of sonar-detect output lines
+produced elsewhere (e.g. on the target device) instead of running the CLI here;
+the result is written to c_eval_<split>_<tag>.json.
 
 Frames are exported once as binary PGM at the working resolution to
 runs/<name>/pgm/<split>/; the CLI is run once per batch of files.
@@ -36,6 +41,14 @@ def export_pgm(ds, out_dir: Path):
     return paths
 
 
+def parse_dets(text, pred):
+    for line in text.splitlines():
+        f, c, s, x0, y0, x1, y1 = line.split()
+        pred.setdefault(int(Path(f).stem), []).append(
+            (int(c), float(s), float(x0), float(y0), float(x1), float(y1)))
+    return pred
+
+
 def run_cli(binary: Path, paths, thr=-4.0, repeat=1, batch=200):
     pred, timing = {}, []
     for a in range(0, len(paths), batch):
@@ -44,10 +57,7 @@ def run_cli(binary: Path, paths, thr=-4.0, repeat=1, batch=200):
         r = subprocess.run([str(binary), "-t", str(thr), "-n", str(repeat)] + [str(p) for p in chunk],
                            capture_output=True, text=True, check=True)
         timing.append((time.time() - t0, len(chunk) * repeat))
-        for line in r.stdout.splitlines():
-            f, c, s, x0, y0, x1, y1 = line.split()
-            idx = int(Path(f).stem)
-            pred.setdefault(idx, []).append((int(c), float(s), float(x0), float(y0), float(x1), float(y1)))
+        parse_dets(r.stdout, pred)
         if r.stderr:
             print(r.stderr.strip())
     for p in paths:
@@ -63,6 +73,8 @@ def main():
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--test-fold", type=int, default=0)
     ap.add_argument("--val-fold", type=int, default=1)
+    ap.add_argument("--pred", help="score sonar-detect output from this file instead of running the CLI")
+    ap.add_argument("--tag", default="", help="suffix for the result file (with --pred)")
     args = ap.parse_args()
     run = ROOT / args.run
     import torch
@@ -71,7 +83,12 @@ def main():
     ds, classes = dev_datasets(model.stride, ck["scale"], args.test_fold, args.val_fold)
     d = ds[args.split]
     paths = export_pgm(d, run / "pgm" / args.split)
-    pred, timing = run_cli(ROOT / args.bin, paths, repeat=args.repeat)
+    if args.pred:
+        pred, timing = parse_dets(Path(args.pred).read_text(), {}), []
+        for p in paths:
+            pred.setdefault(int(p.stem), [])
+    else:
+        pred, timing = run_cli(ROOT / args.bin, paths, repeat=args.repeat)
     aps, m = evaluate(pred, d.gt_boxes(), len(classes))
     q = json.loads((run / "quant_results.json").read_text())[args.split]
     print(f"{args.split}: C runtime mAP@0.5 {100 * m:.2f}   Python int8 {100 * q['map_int8']:.2f}   "
@@ -85,8 +102,10 @@ def main():
         print(f"   {c:16s} C {100 * a:5.1f}  py {100 * pa:5.1f}")
     print(f"max per-class |C - Python| = {100 * worst:.2f} points")
     n = sum(t[1] for t in timing)
-    print(f"wall time incl. process start and PGM I/O: {1e3 * sum(t[0] for t in timing) / n:.2f} ms/frame over {n} frames")
-    (run / f"c_eval_{args.split}.json").write_text(json.dumps(
+    if n:
+        print(f"wall time incl. process start and PGM I/O: {1e3 * sum(t[0] for t in timing) / n:.2f} ms/frame over {n} frames")
+    tag = f"_{args.tag}" if args.tag else ""
+    (run / f"c_eval_{args.split}{tag}.json").write_text(json.dumps(
         {"map_c": m, "map_int8_py": q["map_int8"], "ap_c": {c: (None if np.isnan(a) else float(a)) for c, a in zip(classes, aps)}}, indent=1))
 
 
